@@ -34,3 +34,5 @@ jobs:
         with:
           name: stockpulse-india-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+# Release build trigger verification for StockPulse v3.2.
