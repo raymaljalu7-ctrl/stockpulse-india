@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: stockpulse-india-api
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: "python -c \"import tarfile; tarfile.open('deploy/screenonly.tar.gz','r:gz').extractall('.')\" && pip install -r backend/requirements.txt"
+    startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
