@@ -1,0 +1,38 @@
+name: Apply StockPulse UI theme
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  ui-theme:
+    if: ${{ !contains(github.event.head_commit.message, 'Apply premium StockPulse UI') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply theme and repair frontend syntax
+        shell: bash
+        run: |
+          set -e
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('web/index.html')
+          s=p.read_text()
+          tag='<link rel="stylesheet" href="theme.css">'
+          if tag not in s:
+              s=s.replace('<link rel="stylesheet" href="style.css">','<link rel="stylesheet" href="style.css">'+tag,1)
+              p.write_text(s)
+          n=Path('web/news.js')
+          s=n.read_text()
+          s=s.replace('pnl=value-invested;pct;inv+=invested;val+=value;', 'pnl=value-invested;inv+=invested;val+=value;')
+          n.write_text(s)
+          PY
+          git config user.name 'StockPulse Bot'
+          git config user.email 'actions@github.com'
+          git add web/index.html web/news.js
+          if git diff --cached --quiet; then
+            echo 'No frontend repair changes required'
+          else
+            git commit -m 'Apply premium StockPulse UI'
+            git push
+          fi
