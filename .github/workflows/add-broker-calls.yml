@@ -1,0 +1,69 @@
+name: Add broker and analyst recommendation intelligence
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/trigger-broker-calls.txt'
+permissions:
+  contents: write
+jobs:
+  add:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add broker recommendation API
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('backend/app/broker_routes.py')
+          p.write_text(r'''from datetime import datetime, timezone
+from fastapi import APIRouter
+
+def register_broker_routes(app, nse_get):
+    r=APIRouter()
+    @r.get('/api/broker-recommendations')
+    def broker_recommendations(symbol: str|None=None, limit:int=200):
+        s=(symbol or '').upper().replace('.NS','')
+        items=[]
+        # Public exchange/company feeds may expose analyst/corporate research metadata.
+        # We only display records that are actually returned; never fabricate broker calls.
+        endpoints=['/api/analyst-recommendations','/api/broker-recommendations','/api/stock-recommendations']
+        for ep in endpoints:
+            try:
+                d=nse_get(ep, {'symbol':s} if s else None, 180)
+                rows=d.get('data',[]) if isinstance(d,dict) else []
+                if rows:
+                    for x in rows:
+                        sym=str(x.get('symbol') or x.get('symbolName') or '').upper()
+                        if s and sym!=s: continue
+                        items.append({'symbol':sym,'broker':x.get('broker') or x.get('brokerName') or x.get('source'),'analyst':x.get('analyst'),'rating':x.get('rating') or x.get('recommendation'),'target_price':x.get('targetPrice') or x.get('target'),'current_price':x.get('currentPrice'),'upside_pct':x.get('upside') or x.get('upsidePct'),'horizon':x.get('horizon'),'date':x.get('date') or x.get('publishedAt'),'rationale':x.get('rationale') or x.get('reason'),'source_url':x.get('sourceUrl')})
+                    if items: break
+            except Exception: pass
+        return {'generated_at':datetime.now(timezone.utc).isoformat(),'items':items[:max(1,min(limit,500))],'data_source':'public market feed','disclaimer':'Broker/analyst views are opinions, can change, may have conflicts, and are not guaranteed returns. StockPulse does not endorse any call.'}
+    app.include_router(r)
+''',encoding='utf-8')
+
+          m=Path('backend/app/main.py'); s=m.read_text(); line='from app.broker_routes import register_broker_routes\nregister_broker_routes(app, nse_get)\n'
+          if 'broker_routes import register_broker_routes' not in s: m.write_text(s+'\n'+line,encoding='utf-8')
+
+          p=Path('web/broker-calls.js')
+          p.write_text(r'''(()=>{
+const A=window.API||'https://stockpulse-india-api-v3.onrender.com/api';
+const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function get(u){try{return await (await fetch(A+u,{cache:'no-store'})).json()}catch{return {items:[]}}}
+function add(){const nav=document.querySelector('#tabs');if(!nav||nav.querySelector('[data-tab="broker-calls"]'))return;const b=document.createElement('button');b.dataset.tab='broker-calls';b.textContent='Broker Calls';nav.appendChild(b);b.onclick=()=>load()}
+async function load(){let sec=document.getElementById('broker-calls');if(!sec){sec=document.createElement('section');sec.id='broker-calls';sec.className='hidden';const main=document.querySelector('main');main.insertBefore(sec,main.querySelector('footer'));}sec.className='';sec.innerHTML='<div class="hero"><div><h1>Broker & Analyst Calls</h1><p class="muted">Publicly available broker/analyst recommendations when a live feed is available.</p></div><button class="btn" onclick="loadBrokerCalls()">↻ Refresh</button></div><div id="broker-calls-body"><div class="panel">Loading…</div></div>';window.loadBrokerCalls=async()=>{const d=await get('/broker-recommendations');const body=document.getElementById('broker-calls-body');body.innerHTML=`<div class="panel"><p class="muted">${e(d.disclaimer||'Broker views are opinions, not guarantees.')}</p><div class="tablewrap"><table class="table"><thead><tr><th>Stock</th><th>Broker / Source</th><th>Rating</th><th>Target</th><th>Upside</th><th>Horizon</th><th>Date</th><th>Reason</th></tr></thead><tbody>${(d.items||[]).map(x=>`<tr onclick="detail('${e(x.symbol)}')"><td><b>${e(x.symbol)}</b></td><td>${e(x.broker||x.analyst||'—')}</td><td>${e(x.rating||'—')}</td><td>${x.target_price==null?'—':'₹'+Number(x.target_price).toLocaleString('en-IN')}</td><td>${x.upside_pct==null?'—':e(x.upside_pct)+'%'}</td><td>${e(x.horizon||'—')}</td><td>${e(x.date||'—')}</td><td>${e(x.rationale||'—')}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">No broker/analyst calls are available from the connected public feed right now. StockPulse will not invent recommendations.</td></tr>'}</tbody></table></div></div>`};await window.loadBrokerCalls()}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',add);else add();window.loadBrokerCalls=window.loadBrokerCalls||load;
+})();
+''',encoding='utf-8')
+
+          w=Path('web/index.html'); s=w.read_text(); tag='<script src="/broker-calls.js"></script>'
+          if tag not in s: w.write_text(s.replace('</body>',tag+'</body>'),encoding='utf-8')
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/broker_routes.py backend/app/main.py web/broker-calls.js web/index.html
+          git diff --cached --quiet || git commit -m "Add broker and analyst recommendation section"
+          git push
