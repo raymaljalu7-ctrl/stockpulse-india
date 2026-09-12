@@ -7,6 +7,11 @@
   const recommendationWords=/\b(buy|sell|hold|upgrade|downgrade|target price|price target|outperform|underperform|brokerage|analyst|rating|accumulate|reduce)\b/i;
   const catalystWords=/\b(results|earnings|revenue|profit|order|contract|deal|approval|capex|dividend|bonus|split|buyback|acquisition|merger|guidance|expansion|plant|launch)\b/i;
   const filingWords=/\b(nse|bse|sebi|filing|exchange|disclosure|announcement|regulatory|corporate announcement)\b/i;
+  function installHomeMenu(){
+    const hero=document.querySelector('#home .dashHero');
+    if(!hero||document.getElementById('homeMenu'))return;
+    hero.insertAdjacentHTML('afterend','<div id="homeMenu" class="homeMenu"><button class="menuTile" onclick="setTab(\'home\')"><span class="menuIcon">⌂</span><span>Dashboard</span></button><button class="menuTile" onclick="setTab(\'screen\')"><span class="menuIcon">⌕</span><span>Screener</span></button><button class="menuTile" onclick="setTab(\'watch\')"><span class="menuIcon">★</span><span>Portfolio</span></button><button class="menuTile" onclick="setTab(\'market\')"><span class="menuIcon">◈</span><span>Market</span></button></div>');
+  }
   async function feed(symbol, query){
     const rss=NEWS_BASE+encodeURIComponent(symbol+' '+query);
     const r=await fetch(NEWS_PROXY+encodeURIComponent(rss));
@@ -26,16 +31,11 @@
       const queries=['','NSE BSE SEBI filing announcement disclosure exchange','results earnings revenue profit guidance','buy sell target price brokerage analyst upgrade downgrade','order contract deal partnership capex acquisition expansion','dividend bonus split buyback corporate action','regulatory legal approval management promoter','stock market sector industry outlook'];
       const results=await Promise.allSettled(queries.map(q=>feed(symbol,q)));
       const merged=classify(uniq(results.flatMap(r=>r.status==='fulfilled'?r.value:[])));
-      const rec=merged.filter(x=>x.type==='Recommendation');
-      const filings=merged.filter(x=>x.type==='Filing / Announcement');
-      const catalysts=merged.filter(x=>x.type==='Catalyst');
-      const market=merged.filter(x=>x.type==='Market News');
+      const rec=merged.filter(x=>x.type==='Recommendation'),filings=merged.filter(x=>x.type==='Filing / Announcement'),catalysts=merged.filter(x=>x.type==='Catalyst'),market=merged.filter(x=>x.type==='Market News');
       const sets={all:merged,recommendation:rec,filings,catalysts,market};
       box.innerHTML='<div class="newsTabs"><button class="newsTab active" data-n="all">All News</button><button class="newsTab" data-n="recommendation">Recommendations</button><button class="newsTab" data-n="filings">NSE/BSE/SEBI</button><button class="newsTab" data-n="catalysts">Company/Catalysts</button><button class="newsTab" data-n="market">Market</button></div><div class="newsSummary"><b>'+merged.length+'</b> relevant items collected • recommendations '+rec.length+' • filings '+filings.length+' • catalysts '+catalysts.length+'</div><div id="newsContent">'+newsBlock(merged,'No recent news found.')+'</div>';
       box.querySelectorAll('.newsTab').forEach(b=>b.onclick=()=>{box.querySelectorAll('.newsTab').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('newsContent').innerHTML=newsBlock(sets[b.dataset.n],b.dataset.n==='recommendation'?'No explicit recommendation-related news found.':b.dataset.n==='filings'?'No recent filing/announcement news found.':'No recent news found.')});
-    }catch(e){
-      box.innerHTML='<div class="newsEmpty">News collection is temporarily unavailable. <a target="_blank" rel="noopener" href="https://news.google.com/search?q='+encodeURIComponent(symbol)+'">Open latest '+esc(symbol)+' news</a></div>';
-    }
+    }catch(e){box.innerHTML='<div class="newsEmpty">News collection is temporarily unavailable. <a target="_blank" rel="noopener" href="https://news.google.com/search?q='+encodeURIComponent(symbol)+'">Open latest '+esc(symbol)+' news</a></div>';}
   };
   const original=window.openDetail;
   window.openDetail=function(symbol){
@@ -45,4 +45,5 @@
     body.insertAdjacentHTML('beforeend','<section id="stockNews" class="stockNews"><h3>A-to-Z news & market intelligence</h3><div class="newsLoading">Loading…</div></section>');
     window.loadStockNews(symbol);
   };
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installHomeMenu);else installHomeMenu();
 })();
