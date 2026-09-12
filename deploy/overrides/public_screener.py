@@ -8,6 +8,16 @@ UNIVERSE = ['RELIANCE','TCS','HDFCBANK','ICICIBANK','INFY','HINDUNILVR','ITC','S
 def _clamp(x, lo=0.0, hi=100.0): return max(lo, min(hi, x))
 def _pct(a, b): return ((a / b) - 1.0) * 100.0 if b else 0.0
 
+def _period_returns(closes):
+    def series(max_n, step=1):
+        out={}
+        for n in range(1,max_n+1):
+            idx=n*step
+            if len(closes)>idx: out[str(n)]=round(_pct(closes[-1],closes[-1-idx]),2)
+        return out
+    # Trading-day approximations: 1 trading day, 5 trading days/week, 21 trading days/month.
+    return {'days':series(min(30,len(closes)-1),1),'weeks':series(min(12,(len(closes)-1)//5),5),'months':series(min(12,(len(closes)-1)//21),21),'years':series(min(5,(len(closes)-1)//252),252)}
+
 def _score(closes, volumes):
     if len(closes) < 60: return {}
     last=closes[-1]
@@ -19,15 +29,26 @@ def _score(closes, volumes):
     momentum=_clamp(50+r20*3+r60*.8)
     score=_clamp(momentum*.45+trend*.30+pos*.20+_clamp(vr*50,0,100)*.05)
     band='Strong' if score>=80 else 'Potential' if score>=70 else 'Watch' if score>=55 else 'Avoid'
-    # Transparent, non-predictive reference layer: distance to the 52-week high.
     potential_up=max(0.0,_pct(high,last))
     horizon='4–8 weeks' if band=='Strong' else '6–12 weeks' if band=='Potential' else '12–24 weeks' if band=='Watch' else 'Not recommended'
-    return {'price':round(last,2),'change_pct':round(_pct(last,closes[-2]),2),'return_20d_pct':round(r20,2),'return_60d_pct':round(r60,2),'ma20':round(ma20,2),'ma50':round(ma50,2),'52w_position':round(pos,1),'52w_high':round(high,2),'52w_low':round(low,2),'potential_up_pct':round(potential_up,1),'potential_basis':'Upside to 52-week high (reference, not a forecast)','potential_period':horizon,'volume_multiple':round(vr,2),'final_rank_score':round(score,1),'band':band,'verdict':'price_momentum_candidate' if score>=70 else 'watch','why':['Price above 20-day and 50-day trend levels' if trend==100 else 'Trend confirmation is mixed',f'20-day momentum {r20:+.1f}%',f'52-week range position {pos:.0f}%']}
+    vols=volumes[-8:] if len(volumes)>=8 else volumes
+    volume_today=volumes[-1] if volumes else 0; volume_prev=volumes[-2] if len(volumes)>=2 else volume_today
+    volume_change=volume_today-volume_prev; volume_change_pct=_pct(volume_today,volume_prev)
+    v7=sum(volumes[-7:])/min(7,len(volumes)) if volumes else 0
+    v7_vs=_pct(volume_today,v7)
+    if volume_change_pct>=50 or v7_vs>=100: volume_signal='spike'
+    elif volume_change_pct>=10: volume_signal='rising'
+    elif volume_change_pct<=-10: volume_signal='falling'
+    else: volume_signal='stable'
+    why=['Price above 20-day and 50-day trend levels' if trend==100 else 'Trend confirmation is mixed',f'20-day momentum {r20:+.1f}%',f'52-week range position {pos:.0f}%']
+    if volume_signal in ('rising','spike'): why.append(f'Daily volume {volume_change_pct:+.1f}% vs previous session')
+    elif volume_signal=='falling': why.append(f'Daily volume {volume_change_pct:+.1f}% vs previous session; participation is softer')
+    return {'price':round(last,2),'change_pct':round(_pct(last,closes[-2]),2),'return_20d_pct':round(r20,2),'return_60d_pct':round(r60,2),'ma20':round(ma20,2),'ma50':round(ma50,2),'52w_position':round(pos,1),'52w_high':round(high,2),'52w_low':round(low,2),'potential_up_pct':round(potential_up,1),'potential_basis':'Upside to 52-week high (reference, not a forecast)','potential_period':horizon,'volume_multiple':round(vr,2),'volume_today':round(volume_today),'volume_prev_day':round(volume_prev),'volume_change':round(volume_change),'volume_change_pct':round(volume_change_pct,2),'volume_7d_avg':round(v7),'volume_vs_7d_avg_pct':round(v7_vs,2),'volume_signal':volume_signal,'period_returns':_period_returns(closes),'final_rank_score':round(score,1),'band':band,'verdict':'price_momentum_candidate' if score>=70 else 'watch','why':why}
 
 async def screen_public(limit=25):
     async def one(client,symbol):
         try:
-            r=await client.get(f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS',params={'range':'1y','interval':'1d','events':'history'},headers={'User-Agent':'Mozilla/5.0'})
+            r=await client.get(f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}.NS',params={'range':'5y','interval':'1d','events':'history'},headers={'User-Agent':'Mozilla/5.0'})
             r.raise_for_status(); data=r.json()['chart']['result'][0]; q=data['indicators']['quote'][0]
             closes=[float(x) for x in q.get('close',[]) if x is not None]; volumes=[float(x) for x in q.get('volume',[]) if x is not None]
             s=_score(closes,volumes)
