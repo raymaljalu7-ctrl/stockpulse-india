@@ -1,0 +1,51 @@
+name: Force StockPulse feature implementation
+on:
+  push:
+    paths:
+      - 'scripts/trigger-force.txt'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Materialize suite and broker modules
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          def extract(path, marker):
+              src=Path(path).read_text()
+              blocks=re.findall(r"p\\.write_text\\(r'''(.*?)''', encoding='utf-8'\\)",src,re.S)
+              for b in blocks:
+                  if marker in b: return b
+              raise SystemExit(f'payload not found: {path} {marker}')
+          feature=extract('.github/workflows/implement-stockpulse-suite.yml','def register_feature_routes')
+          suitejs=extract('.github/workflows/implement-stockpulse-suite.yml','function addTab')
+          broker=extract('.github/workflows/add-broker-calls.yml','def broker_recommendations')
+          brokerjs=extract('.github/workflows/add-broker-calls.yml','function loadBrokerCalls')
+          Path('backend/app/feature_routes.py').write_text(feature,encoding='utf-8')
+          Path('web/stockpulse-suite.js').write_text(suitejs,encoding='utf-8')
+          Path('backend/app/broker_routes.py').write_text(broker,encoding='utf-8')
+          Path('web/broker-calls.js').write_text(brokerjs,encoding='utf-8')
+          m=Path('backend/app/main.py'); s=m.read_text()
+          if 'feature_routes import register_feature_routes' not in s:
+              s += '\nfrom app.feature_routes import register_feature_routes\nregister_feature_routes(app, nse_get, current_universe)\n'
+          if 'broker_routes import register_broker_routes' not in s:
+              s += '\nfrom app.broker_routes import register_broker_routes\nregister_broker_routes(app, nse_get)\n'
+          m.write_text(s,encoding='utf-8')
+          w=Path('web/index.html'); s=w.read_text()
+          for tag in ['<script src="/stockpulse-suite.js"></script>','<script src="/broker-calls.js"></script>']:
+              if tag not in s: s=s.replace('</body>',tag+'</body>')
+          w.write_text(s,encoding='utf-8')
+      - name: Validate Python syntax
+        run: python -m py_compile backend/app/main.py backend/app/feature_routes.py backend/app/broker_routes.py
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app web/index.html
+          git diff --cached --quiet || git commit -m "Implement StockPulse intelligence and broker calls"
+          git push
