@@ -1,0 +1,35 @@
+name: Run StockPulse suite implementation
+on:
+  push:
+    paths:
+      - 'scripts/trigger-suite.txt'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Materialize suite files
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          src=Path('.github/workflows/implement-stockpulse-suite.yml').read_text()
+          blocks=re.findall(r"p\.write_text\(r'''(.*?)''', encoding='utf-8'\)",src,re.S)
+          if len(blocks)<2: raise SystemExit('suite payload not found')
+          for b in blocks:
+              if 'def register_feature_routes' in b: Path('backend/app/feature_routes.py').write_text(b,encoding='utf-8')
+              else: Path('web/stockpulse-suite.js').write_text(b,encoding='utf-8')
+          m=Path('backend/app/main.py'); s=m.read_text(); line='from app.feature_routes import register_feature_routes\nregister_feature_routes(app, nse_get, current_universe)\n'
+          if 'feature_routes import register_feature_routes' not in s: m.write_text(s+'\n'+line,encoding='utf-8')
+          w=Path('web/index.html'); s=w.read_text(); tag='<script src="/stockpulse-suite.js"></script>'
+          if tag not in s: w.write_text(s.replace('</body>',tag+'</body>'),encoding='utf-8')
+      - name: Commit suite
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/feature_routes.py backend/app/main.py web/stockpulse-suite.js web/index.html
+          git diff --cached --quiet || git commit -m "Implement full StockPulse stock intelligence suite"
+          git push
