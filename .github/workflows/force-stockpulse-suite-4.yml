@@ -1,53 +1,23 @@
-name: StockPulse implementation runner 4
+name: StockPulse implementation verifier
 on:
   push:
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
-  implement:
-    if: github.event.head_commit.message != 'Implement StockPulse intelligence suite and broker calls'
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Extract and install modules
+      - name: Verify StockPulse modules
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          def payloads(path):
-              s=Path(path).read_text()
-              marker="p.write_text(r'''"
-              end="''', encoding='utf-8')"
-              out=[]; pos=0
-              while True:
-                  a=s.find(marker,pos)
-                  if a<0: break
-                  a+=len(marker); b=s.find(end,a)
-                  if b<0: raise SystemExit('unterminated payload')
-                  out.append(s[a:b]); pos=b+len(end)
-              return out
-          suite=payloads('.github/workflows/implement-stockpulse-suite.yml')
-          broker=payloads('.github/workflows/add-broker-calls.yml')
-          print('payload counts',len(suite),len(broker))
-          for x in suite:
-              Path('backend/app/feature_routes.py' if 'def register_feature_routes' in x else 'web/stockpulse-suite.js').write_text(x)
-          for x in broker:
-              Path('backend/app/broker_routes.py' if 'def broker_recommendations' in x else 'web/broker-calls.js').write_text(x)
-          m=Path('backend/app/main.py'); s=m.read_text()
-          if 'feature_routes import register_feature_routes' not in s: s+='\nfrom app.feature_routes import register_feature_routes\nregister_feature_routes(app, nse_get, current_universe)\n'
-          if 'broker_routes import register_broker_routes' not in s: s+='\nfrom app.broker_routes import register_broker_routes\nregister_broker_routes(app, nse_get)\n'
-          m.write_text(s)
-          w=Path('web/index.html'); s=w.read_text()
-          for t in ['<script src="/stockpulse-suite.js"></script>','<script src="/broker-calls.js"></script>']:
-              if t not in s: s=s.replace('</body>',t+'</body>')
-          w.write_text(s)
-          PY
-      - name: Validate Python syntax
+          test -s backend/app/feature_routes.py
+          test -s backend/app/broker_routes.py
+          test -s web/stockpulse-suite.js
+          test -s web/broker-calls.js
+          grep -q 'feature_routes import register_feature_routes' backend/app/main.py
+          grep -q 'broker_routes import register_broker_routes' backend/app/main.py
+          grep -q '/stockpulse-suite.js' web/index.html
+          grep -q '/broker-calls.js' web/index.html
+      - name: Validate Python
         run: python -m py_compile backend/app/main.py backend/app/feature_routes.py backend/app/broker_routes.py
-      - name: Commit modules
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/app web/index.html
-          git diff --cached --quiet || git commit -m "Implement StockPulse intelligence suite and broker calls"
-          git push
