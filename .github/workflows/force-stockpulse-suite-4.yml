@@ -6,10 +6,26 @@ permissions:
   contents: write
 jobs:
   verify:
-    if: ${{ !contains(github.event.head_commit.message, 'Fix dividend feed date filtering and NSE category') }}
+    if: ${{ !contains(github.event.head_commit.message, 'Fix dividend feed date filtering and NSE category') && !contains(github.event.head_commit.message, 'Broaden StockPulse universe to total-market indices') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Broaden NSE universe discovery
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('backend/app/main.py')
+          s=p.read_text()
+          old='names=["NIFTY 500","NIFTY NEXT 50","NIFTY MIDCAP 150","NIFTY SMALLCAP 250","NIFTY MICROCAP 250","NIFTY MIDCAP 50","NIFTY MIDCAP SELECT"]'
+          new='names=["NIFTY TOTAL MARKET","NIFTY 500","NIFTY 200","NIFTY 100","NIFTY NEXT 50","NIFTY MIDSMALLCAP 400","NIFTY SMALLCAP 500","NIFTY MIDCAP 150","NIFTY SMALLCAP 250","NIFTY MICROCAP 250","NIFTY MIDCAP 100","NIFTY MIDCAP 50","NIFTY MIDCAP SELECT"]'
+          if old in s:
+              s=s.replace(old,new,1)
+          old2='''    out=list(merged.values())\n    if len(out)>=100:return out\n    d=nse_get("/api/equity-stock",{"index":"allstocks"},60)'''
+          new2='''    out=list(merged.values())\n    if len(out)>=100:return out\n    d=nse_get("/api/equity-stock",{"index":"allstocks"},60)'''
+          if old2 in s:
+              s=s.replace(old2,new2,1)
+          p.write_text(s)
+          PY
       - name: Repair NSE dividend feed
         run: |
           python - <<'PY'
@@ -38,11 +54,11 @@ jobs:
           grep -q '/broker-calls.js' web/index.html
       - name: Validate Python
         run: python -m py_compile backend/app/main.py backend/app/feature_routes.py backend/app/broker_routes.py
-      - name: Commit dividend repair
+      - name: Commit StockPulse repairs
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/app/feature_routes.py
+          git add backend/app/main.py backend/app/feature_routes.py
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'Fix dividend feed date filtering and NSE category'
+          git commit -m 'Broaden StockPulse universe to total-market indices'
           git push
