@@ -1,0 +1,43 @@
+name: Fix dividend feed
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/app/feature_routes.py'
+      - '.github/workflows/fix-dividend-feed.yml'
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, 'Fix dividend feed date filtering and NSE category') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch NSE corporate-action date filters
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('backend/app/feature_routes.py')
+          s=p.read_text()
+          old='''    def corp_data(symbol=None):\n        params={"index":"equities"}\n        if symbol: params["symbol"]=symbol\n        # NSE's real endpoint is corporates-corporateActions (plural).\n        d=nse_live("/api/corporates-corporateActions",params,120)\n        return rows(d)\n'''
+          new='''    def corp_data(symbol=None, category=None):\n        # NSE corporate actions is date-window based; without from_date/to_date\n        # the feed can return an empty response from a server-side request.\n        today=datetime.now(timezone.utc).date()\n        params={\n            "index":"equities",\n            "from_date":(today-timedelta(days=365)).strftime("%d-%m-%Y"),\n            "to_date":(today+timedelta(days=90)).strftime("%d-%m-%Y"),\n        }\n        if symbol: params["symbol"]=symbol\n        if category: params["category"]=category\n        d=nse_live("/api/corporates-corporateActions",params,120)\n        return rows(d)\n'''
+          if old not in s:
+              raise SystemExit('corp_data block not found')
+          s=s.replace(old,new,1)
+          old2='''        for x in corp_data(s):\n            purpose=str(x.get('subject') or x.get('purpose') or '')\n            if 'dividend' not in purpose.lower():continue\n'''
+          new2='''        for x in corp_data(s, "dividend"):\n            purpose=str(x.get('subject') or x.get('purpose') or '')\n            if 'dividend' not in purpose.lower():continue\n'''
+          if old2 not in s:
+              raise SystemExit('dividend loop not found')
+          s=s.replace(old2,new2,1)
+          p.write_text(s)
+          PY
+      - name: Validate Python
+        run: python -m py_compile backend/app/feature_routes.py
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/app/feature_routes.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix dividend feed date filtering and NSE category'
+          git push
