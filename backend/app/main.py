@@ -34,10 +34,13 @@ def _rows_to_universe(rows):
         out.append({"symbol":s,"price":p,"change_pct":num(x.get("pChange")),"dayHigh":num(x.get("dayHigh")),"dayLow":num(x.get("dayLow")),"yearHigh":num(x.get("yearHigh")),"yearLow":num(x.get("yearLow")),"volume":num(x.get("totalTradedVolume")),"perChange30d":num(x.get("perChange30d")),"perChange365d":num(x.get("perChange365d")),"companyName":meta.get("companyName") or x.get("companyName") or s,"industry":meta.get("industry") or x.get("industry") or "NSE listed equity","ffmc":num(x.get("ffmc"))})
     return out
 def live_universe():
-    d=nse_get("/api/equity-stock",{"index":"allstocks"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
-    if len(out)>=500:return out
+    # NSE can return a partial/50-stock breadth response from allstocks. Prefer the
+    # NIFTY 500 constituent feed first so a temporary all-stocks response can never
+    # silently reduce StockPulse to only NIFTY 50.
     d=nse_get("/api/equity-stockIndices",{"index":"NIFTY 500"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
     if len(out)>=300:return out
+    d=nse_get("/api/equity-stock",{"index":"allstocks"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
+    if len(out)>=100:return out
     d=nse_get("/api/equity-stockIndices",{"index":"NIFTY 50"},60);return _rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
 def fallback_universe():
     out=[]
