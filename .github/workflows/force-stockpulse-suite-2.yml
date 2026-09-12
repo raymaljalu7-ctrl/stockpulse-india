@@ -1,0 +1,48 @@
+name: Force StockPulse implementation 2
+on:
+  push:
+    paths:
+      - 'scripts/trigger-force-2.txt'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run suite implementation workflow logic
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          src=Path('.github/workflows/implement-stockpulse-suite.yml').read_text()
+          blocks=re.findall(r"p\\.write_text\\(r'''(.*?)''', encoding='utf-8'\\)",src,re.S)
+          print('suite blocks',len(blocks))
+          for b in blocks:
+              if 'def register_feature_routes' in b: Path('backend/app/feature_routes.py').write_text(b)
+              else: Path('web/stockpulse-suite.js').write_text(b)
+          src=Path('.github/workflows/add-broker-calls.yml').read_text()
+          blocks=re.findall(r"p\\.write_text\\(r'''(.*?)''', encoding='utf-8'\\)",src,re.S)
+          print('broker blocks',len(blocks))
+          for b in blocks:
+              if 'def broker_recommendations' in b: Path('backend/app/broker_routes.py').write_text(b)
+              else: Path('web/broker-calls.js').write_text(b)
+          m=Path('backend/app/main.py'); s=m.read_text()
+          if 'feature_routes import register_feature_routes' not in s: s+='\nfrom app.feature_routes import register_feature_routes\nregister_feature_routes(app, nse_get, current_universe)\n'
+          if 'broker_routes import register_broker_routes' not in s: s+='\nfrom app.broker_routes import register_broker_routes\nregister_broker_routes(app, nse_get)\n'
+          m.write_text(s)
+          w=Path('web/index.html'); s=w.read_text()
+          for t in ['<script src="/stockpulse-suite.js"></script>','<script src="/broker-calls.js"></script>']:
+              if t not in s: s=s.replace('</body>',t+'</body>')
+          w.write_text(s)
+          PY
+      - name: Validate
+        run: python -m py_compile backend/app/main.py backend/app/feature_routes.py backend/app/broker_routes.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app web/index.html
+          git diff --cached --quiet || git commit -m "Implement StockPulse intelligence suite and broker calls"
+          git push
