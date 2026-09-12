@@ -106,10 +106,11 @@ def register_feature_routes(app, nse_get, current_universe):
         u,live=current_universe()
         return u,live
 
-    def corp_data(symbol=None):
-        params={"index":"equities"}
+    def corp_data(symbol=None, category=None):
+        today=datetime.now(timezone.utc).date()
+        params={"index":"equities","from_date":(today-timedelta(days=365)).strftime("%d-%m-%Y"),"to_date":(today+timedelta(days=90)).strftime("%d-%m-%Y")}
         if symbol: params["symbol"]=symbol
-        # NSE's real endpoint is corporates-corporateActions (plural).
+        if category: params["category"]=category
         d=nse_live("/api/corporates-corporateActions",params,120)
         return rows(d)
 
@@ -155,7 +156,7 @@ def register_feature_routes(app, nse_get, current_universe):
     @router.get('/api/dividends')
     def dividends(symbol:str|None=None,min_yield:float=0,limit:int=200):
         s=(symbol or '').upper().replace('.NS','');out=[]
-        for x in corp_data(s):
+        for x in corp_data(s, "dividend"):
             purpose=str(x.get('subject') or x.get('purpose') or '')
             if 'dividend' not in purpose.lower():continue
             out.append({'symbol':str(x.get('symbol') or s).upper(),'purpose':purpose,'ex_date':x.get('exDate'),'record_date':x.get('recDate') or x.get('recordDate'),'bc_start_date':x.get('bcStartDate'),'bc_end_date':x.get('bcEndDate'),'dividend':x.get('dividend') or x.get('amount'),'source':'NSE corporate actions'})
