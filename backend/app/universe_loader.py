@@ -8,12 +8,17 @@ UA={"User-Agent":"Mozilla/5.0","Accept":"application/json"}
 _cache:dict[str,tuple[float,Any]]={}
 
 def _get(url,params=None,timeout=15):
-    try:
-        r=requests.get(url,params=params,headers=UA,timeout=timeout)
-        if r.status_code==200:
-            return r.json() if "json" in (r.headers.get("content-type") or "") else r.text
-    except Exception:
-        pass
+    for attempt in range(3):
+        try:
+            r=requests.get(url,params=params,headers=UA,timeout=timeout)
+            if r.status_code==200:
+                return r.json() if "json" in (r.headers.get("content-type") or "") else r.text
+            if r.status_code in (429,500,502,503,504):
+                time.sleep(0.8*(attempt+1))
+                continue
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.5*(attempt+1))
     return None
 
 def nifty500_symbols():
@@ -35,14 +40,15 @@ def nifty500_symbols():
 
 def yahoo_quotes(symbols):
     out=[]
-    for i in range(0,len(symbols),50):
-        batch=symbols[i:i+50]
+    # Yahoo Spark can throttle large bursts. Smaller batches plus retries
+    # avoid the previous failure mode where only the first ~50 symbols arrived.
+    for i in range(0,len(symbols),20):
+        batch=symbols[i:i+20]
         syms=",".join(s+".NS" for s in batch)
         params={"symbols":syms,"range":"1y","interval":"1d","indicators":"close,volume","includeTimestamps":"true","includePrePost":"false","corsDomain":"finance.yahoo.com"}
         d=_get(YAHOO_URL,params,timeout=25)
         results=((d or {}).get("spark") or {}).get("result") or [] if isinstance(d,dict) else []
         for r in results:
-            # Yahoo Spark returns each ticker as {symbol, response:[{meta,timestamp,indicators}]}.
             responses=r.get("response") or []
             z=responses[0] if responses else r
             meta=z.get("meta") or r.get("meta") or {}
@@ -71,9 +77,13 @@ def yahoo_quotes(symbols):
                 "perChange365d":(price-base365)/base365*100 if base365 else 0,
                 "companyName":sym,"industry":"Nifty 500 equity","ffmc":0
             })
+        # Keep a small pause between Yahoo batches to avoid burst throttling.
+        time.sleep(0.15)
     return out
 
 def load_universe():
     syms=nifty500_symbols()
     if len(syms)<300: return []
-    return yahoo_quotes(syms)
+    data=yahoo_quotes(syms)
+    # Require a genuinely broad universe before replacing the app's fallback.
+    return data if len(data)>=100 else []
