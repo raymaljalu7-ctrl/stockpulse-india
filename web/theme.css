@@ -1,0 +1,48 @@
+/* StockPulse India — dark premium visual theme */
+:root{
+  --bg:#05070b;
+  --bg2:#090d14;
+  --panel:#0d121b;
+  --panel2:#111824;
+  --line:#222d3d;
+  --text:#f5f7fb;
+  --muted:#8d99aa;
+  --cyan:#27d9ff;
+  --violet:#8b5cf6;
+  --green:#22c55e;
+  --amber:#f59e0b;
+  --pink:#f43f5e;
+}
+html,body{background:var(--bg)!important;color:var(--text)!important}
+body{background:radial-gradient(circle at 15% 0%,#11152a 0,#05070b 38%,#030406 100%)!important}
+main{max-width:1320px!important}
+.appHeader{padding-bottom:18px!important}
+.brandMark{background:linear-gradient(135deg,#06b6d4,#7c3aed,#ec4899)!important;box-shadow:0 0 28px #7c3aed55!important}
+.brand h1{letter-spacing:-.5px}
+.ghost{background:#0b1018!important;border-color:#293548!important}
+.dashHero{background:linear-gradient(135deg,#0c111b,#111326 55%,#10101b);border:1px solid #252d3b;border-radius:14px;padding:22px;margin-top:12px;box-shadow:0 16px 40px #0007}
+.dashHero h2{letter-spacing:-1px}
+.surface,.kpi,.card,.filters,.stat,.info,.signalPanel,.stockFno,.watchControls,.portfolioKpi,.portfolioRow,.alertRules,.alertRow{background:var(--panel)!important;border-color:var(--line)!important;border-radius:10px!important;box-shadow:0 10px 28px #0006}
+.surface{background:linear-gradient(145deg,#0d121b,#101722)!important}
+.kpi{position:relative;overflow:hidden;background:linear-gradient(145deg,#111827,#0b1018)!important}
+.kpi:nth-child(1){border-top:2px solid var(--cyan)!important}.kpi:nth-child(2){border-top:2px solid var(--green)!important}.kpi:nth-child(3){border-top:2px solid var(--amber)!important}.kpi:nth-child(4){border-top:2px solid var(--violet)!important}
+.card{background:linear-gradient(145deg,#101722,#0b1017)!important;transition:transform .16s,border-color .16s,box-shadow .16s!important}
+.card:hover{transform:translateY(-3px);border-color:#475569!important;box-shadow:0 16px 35px #0009!important}
+.recRow{background:#0c121b!important;border-color:#202b3a!important;border-radius:9px!important}
+.recRow:hover{border-color:#3b82f6!important;background:#101827!important}
+.meta span,.signalWhy span,.alertTags em{background:#151d29!important;border:1px solid #202c3c!important}
+.band.Strong{background:#092f24!important;color:#4ade80!important;border:1px solid #166534}.band.Potential{background:#35260a!important;color:#fbbf24!important;border:1px solid #92400e}.band.Watch{background:#351a0e!important;color:#fb923c!important;border:1px solid #9a3412}.band.Avoid{background:#35111a!important;color:#fb7185!important;border:1px solid #9f1239}
+.filters input,.filters select,.hero select,.watchControls select,.alertRules input{background:#070b11!important;border-color:#293548!important}
+button{border-radius:8px!important;background:linear-gradient(135deg,#2563eb,#7c3aed)!important;box-shadow:0 5px 18px #0006}
+.actionBtn,.watchBtn,.close,.spActions button{background:#151d29!important;border-color:#293548!important}
+.homeMenu{gap:10px!important}.menuTile{border-radius:9px!important;background:#0d121b!important;box-shadow:0 8px 22px #0007!important}
+.menuTile:nth-child(1){border-color:#155e75!important;background:linear-gradient(145deg,#071923,#0d121b)!important}.menuTile:nth-child(2){border-color:#4c1d95!important;background:linear-gradient(145deg,#130d21,#0d121b)!important}.menuTile:nth-child(3){border-color:#166534!important;background:linear-gradient(145deg,#081b13,#0d121b)!important}.menuTile:nth-child(4){border-color:#92400e!important;background:linear-gradient(145deg,#211407,#0d121b)!important}.menuTile:nth-child(5){border-color:#9f1239!important;background:linear-gradient(145deg,#210b12,#0d121b)!important}.menuTile:nth-child(6){border-color:#1d4ed8!important;background:linear-gradient(145deg,#0b1429,#0d121b)!important}
+.spTile{border-radius:9px!important;background:#0d121b!important}.spTile:nth-child(1){border-color:#0891b2!important;background:linear-gradient(145deg,#08202a,#0d121b)!important}.spTile:nth-child(2){border-color:#7c3aed!important;background:linear-gradient(145deg,#170f29,#0d121b)!important}.spTile:nth-child(3){border-color:#16a34a!important;background:linear-gradient(145deg,#092116,#0d121b)!important}.spTile:nth-child(4){border-color:#f59e0b!important;background:linear-gradient(145deg,#241805,#0d121b)!important}
+.spMetric,.spKpi,.spPos,.spBlock{background:#0b1119!important;border-color:#222d3d!important;border-radius:9px!important}
+.spMetric:nth-child(1){border-left:3px solid var(--green)!important}.spMetric:nth-child(2){border-left:3px solid var(--cyan)!important}.spMetric:nth-child(3){border-left:3px solid var(--violet)!important}.spMetric:nth-child(4){border-left:3px solid var(--amber)!important}
+.spReasons div{background:#101722!important;border:1px solid #202b3a}
+.spTable td,.spTable th{border-color:#202b3a!important}
+.modal{background:#000d!important;backdrop-filter:blur(5px)}.modalBox{background:#080d14!important;border-color:#293548!important;border-radius:12px!important;box-shadow:0 25px 70px #000!important}
+.liveDot{box-shadow:0 0 0 4px #22c55e18!important}
+footer{color:#687487!important}
+@media(max-width:650px){.dashHero{padding:16px}.card{padding:14px}.surface{padding:14px}.kpi{padding:14px}}
