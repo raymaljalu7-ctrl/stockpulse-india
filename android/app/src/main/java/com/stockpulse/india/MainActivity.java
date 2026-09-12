@@ -8,7 +8,7 @@ import android.webkit.WebViewClient;
 import android.graphics.Color;
 
 public class MainActivity extends Activity {
-    private static final String APP_URL = "https://stockpulse-india-web.onrender.com/?app=3.3";
+    private static final String APP_URL = "https://stockpulse-india-web.onrender.com/?app=3.4";
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
