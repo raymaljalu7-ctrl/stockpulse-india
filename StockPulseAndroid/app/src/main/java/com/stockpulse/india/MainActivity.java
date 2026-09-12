@@ -8,8 +8,7 @@ import android.webkit.WebViewClient;
 import android.graphics.Color;
 
 public class MainActivity extends Activity {
-    // Cache-busted URL so each APK release loads the current StockPulse web UI.
-    private static final String APP_URL = "https://stockpulse-india-web.onrender.com/?app=3.4.1";
+    private static final String APP_URL = "https://stockpulse-india-web.onrender.com/?app=3.4.2";
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -28,6 +27,6 @@ public class MainActivity extends Activity {
 
     @Override public void onBackPressed() {
         WebView w = findViewById(R.id.webview);
-        if (w.canGoBack()) w.goBack(); else super.onBackPressed();
+        w.evaluateJavascript("(function(){var p=['home','screen','watch','market','portfolio','alerts'];var cur=p.find(function(id){var e=document.getElementById(id);return e&&!e.classList.contains('hidden');});if(cur&&cur!=='home'){if(window.setTab){window.setTab('home');return 'home';}}if(watch && false){} return 'none';})()", null);
     }
 }
