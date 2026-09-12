@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime, timezone
 from typing import Any
@@ -10,7 +11,10 @@ import yfinance as yf
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="StockPulse India API", version="4.0")
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("stockpulse")
+
+app = FastAPI(title="StockPulse India API", version="4.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 NIFTY50 = [
@@ -40,12 +44,8 @@ def pct(a, b):
     return ((a / b) - 1) * 100 if b not in (None, 0) and a is not None else 0.0
 
 
-def history(symbol: str, period="1y"):
-    return yf.Ticker(symbol + ".NS").history(period=period, auto_adjust=False)
-
-
 def period_returns(df: pd.DataFrame):
-    if df.empty:
+    if df.empty or "Close" not in df:
         return {"days": {}, "weeks": {}, "months": {}, "years": {}}
     close = df["Close"].dropna()
     last = float(close.iloc[-1])
@@ -63,12 +63,54 @@ def period_returns(df: pd.DataFrame):
     return out
 
 
-def score_stock(symbol: str):
-    t = yf.Ticker(symbol + ".NS")
-    df = t.history(period="2y", auto_adjust=False)
-    if df.empty:
+def load_universe_history(period="2y") -> dict[str, pd.DataFrame]:
+    """Download the universe in one Yahoo request to avoid 50 sequential rate-limited calls."""
+    tickers = [s + ".NS" for s in NIFTY50]
+    try:
+        raw = yf.download(
+            tickers=tickers, period=period, interval="1d", auto_adjust=False,
+            group_by="ticker", threads=False, progress=False, timeout=20
+        )
+        if raw is not None and not raw.empty:
+            result = {}
+            for symbol in NIFTY50:
+                ticker = symbol + ".NS"
+                try:
+                    if isinstance(raw.columns, pd.MultiIndex) and ticker in raw.columns.get_level_values(0):
+                        df = raw[ticker].copy()
+                    elif not isinstance(raw.columns, pd.MultiIndex) and symbol == NIFTY50[0]:
+                        df = raw.copy()
+                    else:
+                        continue
+                    df = df.dropna(how="all")
+                    if not df.empty and "Close" in df.columns:
+                        result[symbol] = df
+                except Exception as exc:
+                    log.warning("universe parse failed %s: %s", symbol, exc)
+            if result:
+                log.info("Yahoo batch returned %d/%d stocks", len(result), len(NIFTY50))
+                return result
+    except Exception as exc:
+        log.exception("Yahoo batch download failed: %s", exc)
+    return {}
+
+
+def single_history(symbol: str, period="2y") -> pd.DataFrame:
+    try:
+        df = yf.Ticker(symbol + ".NS").history(period=period, auto_adjust=False, timeout=20)
+        return df if df is not None else pd.DataFrame()
+    except Exception as exc:
+        log.warning("history failed for %s: %s", symbol, exc)
+        return pd.DataFrame()
+
+
+def score_from_history(symbol: str, df: pd.DataFrame, info: dict | None = None):
+    if df is None or df.empty or "Close" not in df:
         return None
-    close = df["Close"].dropna(); vol = df["Volume"].fillna(0)
+    close = df["Close"].dropna()
+    if len(close) < 30:
+        return None
+    vol = df["Volume"].fillna(0) if "Volume" in df else pd.Series(0, index=df.index)
     price = float(close.iloc[-1]); prev = float(close.iloc[-2]) if len(close) > 1 else price
     r20 = pct(price, float(close.iloc[-21])) if len(close) > 21 else 0
     r60 = pct(price, float(close.iloc[-61])) if len(close) > 61 else 0
@@ -78,14 +120,13 @@ def score_stock(symbol: str):
     v20 = float(vol.tail(20).mean()); v5 = float(vol.tail(5).mean()); todayv = float(vol.iloc[-1])
     vchg = pct(todayv, v20) if v20 else 0
     ma20=float(close.tail(20).mean()); ma50=float(close.tail(50).mean()); ma200=float(close.tail(200).mean()) if len(close)>=200 else ma50
-    delta=close.diff(); gain=delta.clip(lower=0).rolling(14).mean(); loss=(-delta.clip(upper=0)).rolling(14).mean(); rs=gain/loss.replace(0,np.nan); rsi=float((100-(100/(1+rs))).iloc[-1]) if not rs.empty else 50
-    info={}
-    try: info=t.info or {}
-    except Exception: info={}
-    pe=clean(info.get("trailingPE")); pb=clean(info.get("priceToBook")); roe=clean(info.get("returnOnEquity")); roce=None
+    delta=close.diff(); gain=delta.clip(lower=0).rolling(14).mean(); loss=(-delta.clip(upper=0)).rolling(14).mean(); rs=gain/loss.replace(0,np.nan)
+    rsi=float((100-(100/(1+rs))).iloc[-1]) if not rs.empty and pd.notna(rs.iloc[-1]) else 50
+    info = info or {}
+    pe=clean(info.get("trailingPE")); pb=clean(info.get("priceToBook")); roe=clean(info.get("returnOnEquity"))
     debt=clean(info.get("debtToEquity")); margin=clean(info.get("profitMargins")); mcap=clean(info.get("marketCap")); book=clean(info.get("bookValue")); divy=clean(info.get("dividendYield"))
     fund=50
-    if roe is not None: fund += max(-15,min(20,(roe*100-12)*1.0))
+    if roe is not None: fund += max(-15,min(20,(roe*100-12)))
     if debt is not None: fund += max(-15,min(10,(80-debt)/8))
     if margin is not None: fund += max(-10,min(10,(margin*100-8)*0.8))
     val=50
@@ -98,8 +139,7 @@ def score_stock(symbol: str):
     risk=50
     if debt is not None and debt>150:risk-=20
     if pe is not None and pe>60:risk-=15
-    score=0.35*fund+0.20*val+0.20*((technical+momentum)/2)+0.15*catalyst+0.10*risk
-    score=max(0,min(100,score))
+    score=max(0,min(100,0.35*fund+0.20*val+0.20*((technical+momentum)/2)+0.15*catalyst+0.10*risk))
     band="Strong" if score>=80 else "Potential" if score>=65 else "Watch" if score>=50 else "Avoid"
     reasons=[]
     if price>ma20>ma50: reasons.append("Price is above 20D and 50D moving averages")
@@ -116,37 +156,63 @@ def score_stock(symbol: str):
         "return_20d_pct":round(r20,2),"return_60d_pct":round(r60,2),"return_1y_pct":round(r252,2),"52w_position":round(pos52,1),
         "volume_today":todayv,"volume_5d_avg":v5,"volume_20d_avg":v20,"volume_50d_avg":float(vol.tail(50).mean()),"volume_change_pct":round(vchg,2),
         "rsi14":round(rsi,1),"dma20":round(ma20,2),"dma50":round(ma50,2),"dma200":round(ma200,2),
-        "pe":pe,"pb":pb,"roe":roe,"roce":roce,"debt_to_equity":debt,"profit_margin":margin,"market_cap":mcap,"book_value":book,"dividend_yield":divy,
+        "pe":pe,"pb":pb,"roe":roe,"roce":None,"debt_to_equity":debt,"profit_margin":margin,"market_cap":mcap,"book_value":book,"dividend_yield":divy,
         "short_term_score":round((technical+momentum+volume)/3,1),"medium_term_score":round((technical+momentum+fund)/3,1),"long_term_score":round((fund+val+technical)/3,1),
         "estimated_upside_pct":round(upside,1),"recommendation":"BUY" if score>=75 else "WATCH" if score>=55 else "AVOID","risk":"High" if risk<40 else "Medium" if risk<65 else "Lower",
         "why":reasons,"period_returns":period_returns(df)
     }
 
 
+def score_stock(symbol: str, df: pd.DataFrame | None = None):
+    if df is None:
+        df = single_history(symbol)
+    if df.empty:
+        return None
+    # Fundamentals are optional for the screener; price/volume signals must still work if Yahoo quote info is rate-limited.
+    info = {}
+    try:
+        info = yf.Ticker(symbol + ".NS").fast_info or {}
+    except Exception:
+        pass
+    return score_from_history(symbol, df, info)
+
+
 @app.get("/health")
-def health(): return {"status":"ok","service":"stockpulse-india-api","version":"4.0"}
+def health():
+    return {"status":"ok","service":"stockpulse-india-api","version":"4.1"}
+
 
 @app.get("/api/screener/top")
 def top(limit:int=50,min_quality:float=0):
+    data = load_universe_history("2y")
     items=[]
-    for s in NIFTY50:
+    if not data:
+        raise HTTPException(503, "Live market data provider returned no stock history. Please retry shortly.")
+    for s, df in data.items():
         try:
-            x=score_stock(s)
-            if x and x["final_rank_score"]>=min_quality: items.append(x)
-        except Exception:
-            continue
+            x=score_stock(s, df)
+            if x and x["final_rank_score"]>=min_quality:
+                items.append(x)
+        except Exception as exc:
+            log.warning("scoring failed %s: %s", s, exc)
+    if not items:
+        raise HTTPException(503, "Live market data could not be scored. Please retry shortly.")
     items.sort(key=lambda x:x["final_rank_score"],reverse=True)
-    return {"generated_at":datetime.now(timezone.utc).isoformat(),"items":items[:max(1,min(limit,50))]}
+    return {"generated_at":datetime.now(timezone.utc).isoformat(),"items":items[:max(1,min(limit,50))],"universe_size":len(data)}
+
 
 @app.get("/api/stock/{symbol}")
 def stock(symbol:str):
     s=symbol.upper().replace(".NS","")
+    df=single_history(s)
+    if df.empty:
+        raise HTTPException(503,"Live market data unavailable for this stock")
     try:
-        x=score_stock(s)
-        if not x: raise HTTPException(404,"No market data")
         t=yf.Ticker(s+".NS")
         try: info=t.info or {}
         except Exception: info={}
+        x=score_from_history(s,df,info)
+        if not x: raise HTTPException(503,"No market data")
         out=dict(x)
         out["company_name"]=info.get("longName") or s
         out["sector"]=info.get("sector"); out["industry"]=info.get("industry"); out["business_summary"]=info.get("longBusinessSummary")
@@ -160,18 +226,24 @@ def stock(symbol:str):
         if not out["cons"]: out["cons"].append("No major quantitative risk flag was detected by the current model")
         return out
     except HTTPException: raise
-    except Exception as e: raise HTTPException(502,str(e))
+    except Exception as exc:
+        log.exception("detail failed %s", s)
+        raise HTTPException(502,str(exc))
+
 
 @app.get("/api/market")
 def market():
     result=[]
     for s in ["^NSEI","^NSEBANK"]:
         try:
-            df=yf.Ticker(s).history(period="5d",auto_adjust=False)
+            df=yf.Ticker(s).history(period="5d",auto_adjust=False,timeout=20)
             if not df.empty:
                 result.append({"symbol":s,"price":float(df.Close.iloc[-1]),"change_pct":pct(float(df.Close.iloc[-1]),float(df.Close.iloc[-2])) if len(df)>1 else 0})
-        except Exception: pass
+        except Exception as exc:
+            log.warning("index data failed %s: %s",s,exc)
     return {"generated_at":datetime.now(timezone.utc).isoformat(),"indices":result}
 
+
 @app.get("/api/fno/{symbol}")
-def fno(symbol:str): return {"status":"unavailable","items":[],"message":"Live derivative feed is not enabled in this personal-use build."}
+def fno(symbol:str):
+    return {"status":"unavailable","items":[],"message":"Live derivative feed is not enabled in this personal-use build."}
