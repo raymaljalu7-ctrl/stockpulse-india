@@ -40,8 +40,7 @@ def nifty500_symbols():
 
 def yahoo_quotes(symbols):
     out=[]
-    # Yahoo Spark can throttle large bursts. Smaller batches plus retries
-    # avoid the previous failure mode where only the first ~50 symbols arrived.
+    # Small batches + retries reduce Yahoo throttling while still loading the broad universe.
     for i in range(0,len(symbols),20):
         batch=symbols[i:i+20]
         syms=",".join(s+".NS" for s in batch)
@@ -67,17 +66,7 @@ def yahoo_quotes(symbols):
             for v in reversed(vols):
                 if isinstance(v,(int,float)):
                     vol=float(v); break
-            out.append({
-                "symbol":sym,"price":price,
-                "change_pct":(price-prev)/prev*100 if prev else 0,
-                "dayHigh":max(vals[-2:]) if len(vals)>=2 else price,
-                "dayLow":min(vals[-2:]) if len(vals)>=2 else price,
-                "yearHigh":max(vals),"yearLow":min(vals),"volume":vol,
-                "perChange30d":(price-base30)/base30*100 if base30 else 0,
-                "perChange365d":(price-base365)/base365*100 if base365 else 0,
-                "companyName":sym,"industry":"Nifty 500 equity","ffmc":0
-            })
-        # Keep a small pause between Yahoo batches to avoid burst throttling.
+            out.append({"symbol":sym,"price":price,"change_pct":(price-prev)/prev*100 if prev else 0,"dayHigh":max(vals[-2:]) if len(vals)>=2 else price,"dayLow":min(vals[-2:]) if len(vals)>=2 else price,"yearHigh":max(vals),"yearLow":min(vals),"volume":vol,"perChange30d":(price-base30)/base30*100 if base30 else 0,"perChange365d":(price-base365)/base365*100 if base365 else 0,"companyName":sym,"industry":"Nifty 500 equity","ffmc":0})
         time.sleep(0.15)
     return out
 
@@ -85,5 +74,6 @@ def load_universe():
     syms=nifty500_symbols()
     if len(syms)<300: return []
     data=yahoo_quotes(syms)
-    # Require a genuinely broad universe before replacing the app's fallback.
-    return data if len(data)>=100 else []
+    # Never treat a partial 100-stock result as the intended broad universe.
+    # Return it only when it is genuinely broad enough to be useful.
+    return data if len(data)>=300 else []
