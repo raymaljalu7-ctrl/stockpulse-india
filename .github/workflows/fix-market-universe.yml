@@ -1,0 +1,30 @@
+name: Fix StockPulse universe
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/fix-market-universe.yml']
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch NSE universe discovery
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('backend/app/main.py')
+          s=p.read_text()
+          old='''def live_universe():\n    d=nse_get("/api/equity-stock",{"index":"allstocks"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])\n    if len(out)>=500:return out\n    d=nse_get("/api/equity-stockIndices",{"index":"NIFTY 500"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])\n    if len(out)>=300:return out\n    d=nse_get("/api/equity-stockIndices",{"index":"NIFTY 50"},60);return _rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])\n'''
+          new='''def live_universe():\n    # NSE can return a partial/50-stock breadth response from allstocks. Prefer the\n    # NIFTY 500 constituent feed first so a temporary all-stocks response can never\n    # silently reduce StockPulse to only NIFTY 50.\n    d=nse_get("/api/equity-stockIndices",{"index":"NIFTY 500"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])\n    if len(out)>=300:return out\n    d=nse_get("/api/equity-stock",{"index":"allstocks"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])\n    if len(out)>=100:return out\n    d=nse_get("/api/equity-stockIndices",{"index":"NIFTY 50"},60);return _rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])\n'''
+          if old not in s:
+              raise SystemExit('target live_universe block not found')
+          p.write_text(s.replace(old,new))
+      - name: Commit backend fix
+        run: |
+          git config user.name 'StockPulse Bot'
+          git config user.email 'actions@github.com'
+          git add backend/app/main.py
+          git commit -m 'Fix NSE universe discovery fallback' || exit 0
+          git push
