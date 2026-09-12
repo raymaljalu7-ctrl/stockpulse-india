@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: stockpulse-india-api-v2
+    name: stockpulse-india-api-v3
     runtime: python
     plan: free
     region: singapore
