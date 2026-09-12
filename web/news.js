@@ -1,5 +1,5 @@
 (function(){
-const API='https://stockpulse-india-api-v2.onrender.com/api';
+const API='https://stockpulse-india-api-v3.onrender.com/api';
 const esc=s=>String(s??'').replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]));
 const n=v=>Number(v)||0, money=v=>n(v).toLocaleString('en-IN',{maximumFractionDigits:2}), pct=v=>(n(v)>=0?'+':'')+n(v).toFixed(2)+'%';
 const getWatch=()=>{try{return JSON.parse(localStorage.getItem('stockpulse_watch')||'[]')}catch(e){return[]}}, setWatch=a=>localStorage.setItem('stockpulse_watch',JSON.stringify(a));
