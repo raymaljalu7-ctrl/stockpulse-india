@@ -38,4 +38,4 @@ jobs:
 
 # v4.0: rebuild APK whenever the web UI changes so the installed app stays current.
 # v4.2: force fresh APK build for current Android WebView release.
-# v4.2.1: rebuild current main branch after latest UI/backend integration.
+# v4.2.2: force a new APK build from the latest main branch.
