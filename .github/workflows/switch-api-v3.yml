@@ -1,0 +1,24 @@
+name: Point StockPulse web to API v3
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  switch-api:
+    if: ${{ !contains(github.event.head_commit.message, 'Point web to API v3') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replace API endpoint
+        run: |
+          if grep -R -q 'stockpulse-india-api-v2' web; then
+            sed -i 's/stockpulse-india-api-v2/stockpulse-india-api-v3/g' web/index.html web/news.js || true
+            git config user.name 'StockPulse Bot'
+            git config user.email 'actions@github.com'
+            git add web/index.html web/news.js
+            git commit -m 'Point web to API v3'
+            git push
+          else
+            echo 'API v3 already configured'
+          fi
