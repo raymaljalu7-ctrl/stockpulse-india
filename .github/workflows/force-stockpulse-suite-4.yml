@@ -6,7 +6,7 @@ permissions:
   contents: write
 jobs:
   verify:
-    if: ${{ !contains(github.event.head_commit.message, 'Fix dividend feed date filtering and NSE category') && !contains(github.event.head_commit.message, 'Broaden StockPulse universe to total-market indices') }}
+    if: ${{ !contains(github.event.head_commit.message, 'Fix dividend feed date filtering and NSE category') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +20,6 @@ jobs:
           new='names=["NIFTY TOTAL MARKET","NIFTY 500","NIFTY 200","NIFTY 100","NIFTY NEXT 50","NIFTY MIDSMALLCAP 400","NIFTY SMALLCAP 500","NIFTY MIDCAP 150","NIFTY SMALLCAP 250","NIFTY MICROCAP 250","NIFTY MIDCAP 100","NIFTY MIDCAP 50","NIFTY MIDCAP SELECT"]'
           if old in s:
               s=s.replace(old,new,1)
-          old2='''    out=list(merged.values())\n    if len(out)>=100:return out\n    d=nse_get("/api/equity-stock",{"index":"allstocks"},60)'''
-          new2='''    out=list(merged.values())\n    if len(out)>=100:return out\n    d=nse_get("/api/equity-stock",{"index":"allstocks"},60)'''
-          if old2 in s:
-              s=s.replace(old2,new2,1)
           p.write_text(s)
           PY
       - name: Repair NSE dividend feed
