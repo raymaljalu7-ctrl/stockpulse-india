@@ -41,7 +41,7 @@ def _rows_to_universe(rows):
 def live_universe():
     d=nse_get("/api/market-data-pre-open",{"key":"ALL"},30);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
     if len(out)>=300:return out
-    names=["NIFTY 500","NIFTY NEXT 50","NIFTY MIDCAP 150","NIFTY SMALLCAP 250","NIFTY MICROCAP 250","NIFTY MIDCAP 50","NIFTY MIDCAP SELECT"]
+    names=["NIFTY TOTAL MARKET","NIFTY 500","NIFTY 200","NIFTY 100","NIFTY NEXT 50","NIFTY MIDSMALLCAP 400","NIFTY SMALLCAP 500","NIFTY MIDCAP 150","NIFTY SMALLCAP 250","NIFTY MICROCAP 250","NIFTY MIDCAP 100","NIFTY MIDCAP 50","NIFTY MIDCAP SELECT"]
     merged={x["symbol"]:x for x in out}
     for name in names:
         d=nse_get("/api/equity-stockIndices",{"index":name},60);rows=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
