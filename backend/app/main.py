@@ -94,3 +94,6 @@ def market():
     return {"generated_at":datetime.now(timezone.utc).isoformat(),"indices":result,"data_source":"NSE live + BSE when available" if data else "Fallback market snapshot; SENSEX unavailable without BSE feed"}
 @app.get("/api/fno/{symbol}")
 def fno(symbol:str):return {"status":"unavailable","items":[],"message":"Live derivative feed is not enabled in this personal-use build."}
+
+from app.feature_routes import register_feature_routes
+register_feature_routes(app, nse_get, current_universe)
