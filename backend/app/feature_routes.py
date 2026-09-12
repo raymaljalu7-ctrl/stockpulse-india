@@ -1,21 +1,42 @@
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
-import hashlib, math, requests
+from html.parser import HTMLParser
+import hashlib, math, requests, re
+
+
+class _TableParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.rows=[]; self.row=None; self.cell=None; self.links=[]
+    def handle_starttag(self, tag, attrs):
+        a=dict(attrs)
+        if tag.lower()=='tr':
+            self.row=[]; self.links=[]
+        elif tag.lower() in ('td','th') and self.row is not None:
+            self.cell=[]
+        elif tag.lower()=='a' and self.row is not None:
+            href=a.get('href')
+            if href:self.links.append(href)
+    def handle_data(self, data):
+        if self.cell is not None:data=self.cell.append(data)
+    def handle_endtag(self, tag):
+        t=tag.lower()
+        if t in ('td','th') and self.row is not None and self.cell is not None:
+            self.row.append(' '.join(self.cell).strip());self.cell=None
+        elif t=='tr' and self.row is not None:
+            if self.row:self.rows.append((self.row,list(self.links)))
+            self.row=None;self.cell=None;self.links=[]
 
 
 def register_feature_routes(app, nse_get, current_universe):
-    # Replace the earlier placeholder endpoints with production versions.  The old
-    # routes used non-existent NSE paths for corporate actions and could silently
-    # return empty data; the scanner route also fell back to NIFTY50 too early.
     replace_paths={"/api/screener/top","/api/stock/{symbol}","/api/market","/api/dividends","/api/corporate-actions","/api/board-meetings"}
     app.router.routes=[r for r in app.router.routes if getattr(r,"path",None) not in replace_paths]
     router=APIRouter()
-
     NSE="https://www.nseindia.com"
     NH={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36","Accept":"application/json,text/plain,*/*","Accept-Language":"en-US,en;q=0.9","Referer":"https://www.nseindia.com/","X-Requested-With":"XMLHttpRequest"}
     ns=requests.Session();ns.headers.update(NH);nse_boot=False
-    bs=requests.Session();bs.headers.update({"User-Agent":NH["User-Agent"],"Accept":"application/json,text/plain,*/*","Referer":"https://www.bseindia.com/"})
+    bs=requests.Session();bs.headers.update({"User-Agent":NH["User-Agent"],"Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8","Accept-Language":"en-US,en;q=0.9","Referer":"https://www.moneycontrol.com/"})
     cache={}
 
     def _num(v, default=0.0):
@@ -26,72 +47,47 @@ def register_feature_routes(app, nse_get, current_universe):
 
     def nse_live(path, params=None, ttl=30):
         nonlocal nse_boot
-        key=path+repr(sorted((params or {}).items()))
-        hit=cache.get(key)
+        key=path+repr(sorted((params or {}).items()));hit=cache.get(key)
         if hit and (datetime.now(timezone.utc).timestamp()-hit[0])<ttl:return hit[1]
         for attempt in range(3):
             try:
-                if not nse_boot:
-                    ns.get(NSE+"/",timeout=12); nse_boot=True
+                if not nse_boot: ns.get(NSE+"/",timeout=12);nse_boot=True
                 r=ns.get(NSE+path,params=params,timeout=20)
                 if r.status_code==200:
                     d=r.json();cache[key]=(datetime.now(timezone.utc).timestamp(),d);return d
                 if r.status_code in (401,403,429):
                     nse_boot=False;ns.cookies.clear();ns.get(NSE+"/",timeout=12);nse_boot=True
-            except Exception:
-                nse_boot=False
+            except Exception: nse_boot=False
         return None
 
     def rows(d):
-        if isinstance(d,list): return d
-        if isinstance(d,dict):
-            x=d.get("data")
-            if isinstance(x,list): return x
+        if isinstance(d,list):return d
+        if isinstance(d,dict) and isinstance(d.get("data"),list):return d["data"]
         return []
 
     def norm_stock(x):
-        meta=x.get("meta") or x.get("metadata") or {}
-        pi=x.get("priceInfo") or {}
-        sym=str(x.get("symbol") or meta.get("symbol") or "").strip().upper()
-        p=_num(x.get("lastPrice") or pi.get("lastPrice"))
-        if not sym or p<=0 or sym in {"NIFTY","NIFTY 50","NIFTY BANK","SENSEX"}: return None
+        meta=x.get("meta") or x.get("metadata") or {};pi=x.get("priceInfo") or {}
+        sym=str(x.get("symbol") or meta.get("symbol") or "").strip().upper();p=_num(x.get("lastPrice") or pi.get("lastPrice"))
+        if not sym or p<=0 or sym in {"NIFTY","NIFTY 50","NIFTY BANK","SENSEX"}:return None
         wh=pi.get("weekHighLow") or {}
         return {"symbol":sym,"price":p,"change_pct":_num(x.get("pChange") or pi.get("pChange")),"dayHigh":_num(x.get("dayHigh") or pi.get("high")),"dayLow":_num(x.get("dayLow") or pi.get("low")),"yearHigh":_num(x.get("yearHigh") or wh.get("max")),"yearLow":_num(x.get("yearLow") or wh.get("min")),"volume":_num(x.get("totalTradedVolume") or pi.get("totalTradedVolume")),"perChange30d":_num(x.get("perChange30d")),"perChange365d":_num(x.get("perChange365d")),"companyName":meta.get("companyName") or x.get("companyName") or sym,"industry":meta.get("industry") or x.get("industry") or "NSE listed equity","ffmc":_num(x.get("ffmc"))}
 
     def broad_universe():
         merged={}
-        # This endpoint is the broad NSE market feed and should be preferred over
-        # the pre-open feed, which can contain only a small subset outside session.
-        candidates=[
-            ("/api/equity-stock",{"index":"allstocks"}),
-            ("/api/equity-stockIndices",{"index":"NIFTY 500"}),
-            ("/api/equity-stockIndices",{"index":"NIFTY NEXT 50"}),
-            ("/api/equity-stockIndices",{"index":"NIFTY MIDCAP 150"}),
-            ("/api/equity-stockIndices",{"index":"NIFTY SMALLCAP 250"}),
-            ("/api/equity-stockIndices",{"index":"NIFTY MICROCAP 250"}),
-        ]
+        candidates=[("/api/equity-stock",{"index":"allstocks"}),("/api/equity-stockIndices",{"index":"NIFTY 500"}),("/api/equity-stockIndices",{"index":"NIFTY NEXT 50"}),("/api/equity-stockIndices",{"index":"NIFTY MIDCAP 150"}),("/api/equity-stockIndices",{"index":"NIFTY SMALLCAP 250"}),("/api/equity-stockIndices",{"index":"NIFTY MICROCAP 250"})]
         for path,params in candidates:
             for x in rows(nse_live(path,params,60)):
                 q=norm_stock(x)
-                if q: merged[q["symbol"]]=q
-            if len(merged)>=1000: break
-        # Equity master is a useful final symbol discovery source; enrich any rows
-        # already having prices rather than fabricating prices for unknown symbols.
+                if q:merged[q["symbol"]]=q
+            if len(merged)>=1000:break
         if len(merged)<100:
-            d=nse_live("/api/market-data-pre-open",{"key":"ALL"},60)
-            for x in rows(d):
+            for x in rows(nse_live("/api/market-data-pre-open",{"key":"ALL"},60)):
                 q=norm_stock(x)
-                if q: merged[q["symbol"]]=q
+                if q:merged[q["symbol"]]=q
         return list(merged.values())
 
     def snapshot(q,live=True):
-        p=q["price"];r30=q.get("perChange30d",0);r365=q.get("perChange365d",0)
-        pos=max(0,min(100,(p-q.get("yearLow",p))/(q.get("yearHigh",p)-q.get("yearLow",p))*100 if q.get("yearHigh",0)>q.get("yearLow",0) else 50))
-        momentum=max(0,min(100,50+r30*1.5+r365*.12+q.get("change_pct",0)*2)); technical=max(0,min(100,50+r30*1.3+r365*.08+(pos-50)*.25)); short=max(0,min(100,.5*momentum+.3*technical+.2*pos)); score=max(0,min(100,.45*technical+.3*momentum+.15*pos+.1*short))
-        band="Strong" if score>=80 else "Potential" if score>=65 else "Watch" if score>=50 else "Avoid"
-        upside=max(-20,min(60,.55*r30+.12*r365+.22*(short-50)))
-        rec="STRONG BUY" if short>=82 and upside>=6 else "BUY" if short>=70 and upside>=3 else "WATCH" if short>=55 else "AVOID"
-        why=[]
+        p=q["price"];r30=q.get("perChange30d",0);r365=q.get("perChange365d",0);pos=max(0,min(100,(p-q.get("yearLow",p))/(q.get("yearHigh",p)-q.get("yearLow",p))*100 if q.get("yearHigh",0)>q.get("yearLow",0) else 50));momentum=max(0,min(100,50+r30*1.5+r365*.12+q.get("change_pct",0)*2));technical=max(0,min(100,50+r30*1.3+r365*.08+(pos-50)*.25));short=max(0,min(100,.5*momentum+.3*technical+.2*pos));score=max(0,min(100,.45*technical+.3*momentum+.15*pos+.1*short));band="Strong" if score>=80 else "Potential" if score>=65 else "Watch" if score>=50 else "Avoid";upside=max(-20,min(60,.55*r30+.12*r365+.22*(short-50)));rec="STRONG BUY" if short>=82 and upside>=6 else "BUY" if short>=70 and upside>=3 else "WATCH" if short>=55 else "AVOID";why=[]
         if q.get("change_pct",0)>1:why.append(f"Today's price change is +{q['change_pct']:.2f}%")
         if r30>5:why.append(f"30D momentum is +{r30:.1f}%")
         if r365>10:why.append(f"1Y momentum is +{r365:.1f}%")
@@ -103,60 +99,110 @@ def register_feature_routes(app, nse_get, current_universe):
     def universe():
         u=broad_universe()
         if len(u)>=100:return u,True
-        u,live=current_universe()
-        return u,live
+        u,live=current_universe();return u,live
 
-    def corp_data(symbol=None, category=None):
-        today=datetime.now(timezone.utc).date()
-        params={"index":"equities","from_date":(today-timedelta(days=365)).strftime("%d-%m-%Y"),"to_date":(today+timedelta(days=90)).strftime("%d-%m-%Y")}
-        if symbol: params["symbol"]=symbol
-        if category: params["category"]=category
-        d=nse_live("/api/corporates-corporateActions",params,120)
-        return rows(d)
+    def corp_data(symbol=None,category=None):
+        today=datetime.now(timezone.utc).date();params={"index":"equities","from_date":(today-timedelta(days=365)).strftime("%d-%m-%Y"),"to_date":(today+timedelta(days=90)).strftime("%d-%m-%Y")}
+        if symbol:params["symbol"]=symbol
+        if category:params["category"]=category
+        return rows(nse_live("/api/corporates-corporateActions",params,120))
 
     def bse_sensex():
         urls=["https://api.bseindia.com/RealTimeBseIndiaAPI/api/GetSensexData/w","https://api.bseindia.com/RealTimeBseIndiaAPI/api/GetSensexData/w?flag=1"]
         for u in urls:
             try:
                 r=bs.get(u,timeout=12)
-                if r.status_code!=200: continue
-                d=r.json(); items=d if isinstance(d,list) else [d]
+                if r.status_code!=200:continue
+                d=r.json();items=d if isinstance(d,list) else [d]
                 for row in items:
                     if not isinstance(row,dict):continue
-                    price=next((_num(row.get(k),None) for k in ("CurrValue","LTP","ltp","Last","last","Close","close","IndexValue") if row.get(k) not in (None,"")),None)
-                    chg=next((_num(row.get(k),None) for k in ("ChangePercent","ChgPer","perchg","PercentChange","percentChange") if row.get(k) not in (None,"")),None)
+                    price=next((_num(row.get(k),None) for k in ("CurrValue","LTP","ltp","Last","last","Close","close","IndexValue") if row.get(k) not in (None,"")),None);chg=next((_num(row.get(k),None) for k in ("ChangePercent","ChgPer","perchg","PercentChange","percentChange") if row.get(k) not in (None,"")),None)
                     if price is not None and price>0:return {"price":price,"change_pct":chg or 0.0}
-            except Exception: pass
+            except Exception:pass
         return {"price":None,"change_pct":None}
+
+    def _clean(v):return re.sub(r"\s+"," ",str(v or "")).strip()
+    def _moneycontrol_calls():
+        url="https://www.moneycontrol.com/broker-research/latestResearchReport/?classic=true"
+        try:
+            r=bs.get(url,timeout=20)
+            if r.status_code!=200:return []
+            p=_TableParser();p.feed(r.text);table=[]
+            for cells,links in p.rows:
+                lc=[_clean(x).lower() for x in cells]
+                if len(cells)>=7 and any('company' in x for x in lc) and any('broker' in x for x in lc):
+                    table=(cells,links);break
+            if not table:return []
+            headers=[_clean(x).lower() for x in table[0]];out=[]
+            def idx(*names):
+                for n in names:
+                    for i,h in enumerate(headers):
+                        if n in h:return i
+                return -1
+            ci,bi,ri,di,cm,ti,pi=[idx(x) for x in ('company','broker','reco','date','cmp','target','profit')]
+            if ci<0 or bi<0 or ri<0:return []
+            # Re-parse all rows and use the discovered column positions.
+            seen=set()
+            for cells,links in p.rows:
+                if len(cells)<=max(ci,bi,ri):continue
+                company=_clean(cells[ci]);broker=_clean(cells[bi]);rating=_clean(cells[ri]);date=_clean(cells[di]) if 0<=di<len(cells) else ''
+                if not company or company.lower() in ('company','stock') or not broker or rating.lower() not in ('buy','sell','hold','accumulate','neutral','outperform','underperform','reduce','add','overweight'):
+                    continue
+                target=_num(cells[ti],0) if 0<=ti<len(cells) else 0;cmp=_num(cells[cm],0) if 0<=cm<len(cells) else 0
+                key=(company,broker,rating,date,target)
+                if key in seen or target<=0:continue
+                seen.add(key);href=next((x for x in links if x.startswith('http')),url)
+                out.append({'company':company,'symbol':company,'broker':broker,'analyst':'','rating':rating.upper(),'target_price':round(target,2),'current_price':round(cmp,2) if cmp>0 else None,'upside_pct':round((target-cmp)/cmp*100,2) if cmp>0 else None,'horizon':'Broker research','date':date,'rationale':f'{broker} research listing: {rating.title()} with a target of ₹{target:,.0f}.','source_url':href,'source':'Moneycontrol Broker Research'})
+            return out[:100]
+        except Exception:return []
+
+    def _company_lookup():
+        try:
+            u,_=current_universe();return u
+        except Exception:return []
+
+    def _enrich_calls(items):
+        u=_company_lookup()
+        def norm(s):return re.sub(r'[^a-z0-9]','',str(s or '').lower().replace('limited','').replace('ltd',''))
+        lookup={norm(x.get('symbol')):x for x in u};lookup.update({norm(x.get('companyName')):x for x in u})
+        for x in items:
+            q=lookup.get(norm(x.get('company')))
+            if not q:
+                nt=set(re.findall(r'[a-z0-9]{3,}',norm(x.get('company'))))
+                best=None;score=0
+                for y in u:
+                    yt=set(re.findall(r'[a-z0-9]{3,}',norm(y.get('companyName'))));sc=len(nt & yt)
+                    if sc>score:best,score=y,sc
+                q=best if score>=1 else None
+            if q:
+                x['symbol']=q['symbol'];x['company']=q.get('companyName') or x['company'];x['current_price']=round(q['price'],2)
+                if x.get('target_price') and q.get('price'):x['upside_pct']=round((x['target_price']/q['price']-1)*100,2)
+        return items
 
     @router.get('/api/screener/top')
     def top(limit:int=5000,min_quality:float=0):
-        u,live=universe();items=[snapshot(q,live) for q in u if q.get("price",0)>0 and snapshot(q,live)["final_rank_score"]>=min_quality]
-        items.sort(key=lambda x:(x["short_term_score"],x["estimated_upside_pct"],x["final_rank_score"]),reverse=True)
-        return {"generated_at":datetime.now(timezone.utc).isoformat(),"items":items[:max(1,min(limit,5000))],"universe_size":len(u),"data_source":"NSE live" if live else "Fallback market snapshot"}
+        u,live=universe();items=[snapshot(q,live) for q in u if q.get('price',0)>0];items=[x for x in items if x['final_rank_score']>=min_quality];items.sort(key=lambda x:(x['short_term_score'],x['estimated_upside_pct'],x['final_rank_score']),reverse=True);return {'generated_at':datetime.now(timezone.utc).isoformat(),'items':items[:max(1,min(limit,5000))],'universe_size':len(u),'data_source':'NSE live' if live else 'Fallback market snapshot'}
 
     @router.get('/api/stock/{symbol}')
     def stock(symbol:str):
         s=symbol.upper().replace('.NS','');u,live=universe();q=next((x for x in u if x['symbol']==s),None)
-        if not q:raise HTTPException(404,"Stock not found")
-        x=snapshot(q,live);x.update({"business_summary":"Quantitative StockPulse market snapshot.","52w_high":q.get("yearHigh"),"52w_low":q.get("yearLow"),"pros":x["why"][:5],"cons":["Fundamental ratios are not available in the current public-data fallback"]});return x
+        if not q:raise HTTPException(404,'Stock not found')
+        x=snapshot(q,live);x.update({'business_summary':'Quantitative StockPulse market snapshot.','52w_high':q.get('yearHigh'),'52w_low':q.get('yearLow'),'pros':x['why'][:5],'cons':['Fundamental ratios are not available in the current public-data fallback']});return x
 
     @router.get('/api/market')
     def market():
-        d=nse_live("/api/allIndices",None,30);out=[]
+        d=nse_live('/api/allIndices',None,30);out=[]
         for x in rows(d):
-            name=str(x.get("index") or x.get("indexSymbol") or x.get("indexName") or "")
-            if name in {"NIFTY 50","NIFTY BANK"} or x.get("indexSymbol") in {"NIFTY","NIFTY BANK"}:
-                out.append({"symbol":"NIFTY 50" if name=="NIFTY 50" or x.get("indexSymbol")=="NIFTY" else "NIFTY BANK","price":_num(x.get("last")),"change_pct":_num(x.get("percentChange") or x.get("percChange"))})
-        for sym in ("NIFTY 50","NIFTY BANK"):
-            if not any(x["symbol"]==sym for x in out):out.append({"symbol":sym,"price":None,"change_pct":None})
-        sx=bse_sensex();out.append({"symbol":"SENSEX","price":sx["price"],"change_pct":sx["change_pct"]})
-        return {"generated_at":datetime.now(timezone.utc).isoformat(),"indices":out,"data_source":"NSE live + BSE SENSEX live" if sx["price"] else "NSE live; BSE SENSEX unavailable"}
+            name=str(x.get('index') or x.get('indexSymbol') or x.get('indexName') or '')
+            if name in {'NIFTY 50','NIFTY BANK'} or x.get('indexSymbol') in {'NIFTY','NIFTY BANK'}:out.append({'symbol':'NIFTY 50' if name=='NIFTY 50' or x.get('indexSymbol')=='NIFTY' else 'NIFTY BANK','price':_num(x.get('last')),'change_pct':_num(x.get('percentChange') or x.get('percChange'))})
+        for sym in ('NIFTY 50','NIFTY BANK'):
+            if not any(x['symbol']==sym for x in out):out.append({'symbol':sym,'price':None,'change_pct':None})
+        sx=bse_sensex();out.append({'symbol':'SENSEX','price':sx['price'],'change_pct':sx['change_pct']});return {'generated_at':datetime.now(timezone.utc).isoformat(),'indices':out,'data_source':'NSE live + BSE SENSEX live' if sx['price'] else 'NSE live; BSE SENSEX unavailable'}
 
     @router.get('/api/dividends')
     def dividends(symbol:str|None=None,min_yield:float=0,limit:int=200):
         s=(symbol or '').upper().replace('.NS','');out=[]
-        for x in corp_data(s, "dividend"):
+        for x in corp_data(s,'dividend'):
             purpose=str(x.get('subject') or x.get('purpose') or '')
             if 'dividend' not in purpose.lower():continue
             out.append({'symbol':str(x.get('symbol') or s).upper(),'purpose':purpose,'ex_date':x.get('exDate'),'record_date':x.get('recDate') or x.get('recordDate'),'bc_start_date':x.get('bcStartDate'),'bc_end_date':x.get('bcEndDate'),'dividend':x.get('dividend') or x.get('amount'),'source':'NSE corporate actions'})
@@ -195,7 +241,14 @@ def register_feature_routes(app, nse_get, current_universe):
 
     @router.get('/api/trade/quote/{symbol}')
     def trade_quote(symbol:str):
-        s=symbol.upper().replace('.NS','');u,_=universe();q=next((x for x in u if x['symbol']==s),None)
-        return {'symbol':s,'price':q['price'] if q else None,'buy_supported':False,'sell_supported':False,'message':'Broker execution is not connected. Use this module for order planning and portfolio tracking.'}
+        s=symbol.upper().replace('.NS','');u,_=universe();q=next((x for x in u if x['symbol']==s),None);return {'symbol':s,'price':q['price'] if q else None,'buy_supported':False,'sell_supported':False,'message':'Broker execution is not connected. Use this module for order planning and portfolio tracking.'}
+
+    @router.get('/api/broker-recommendations')
+    def broker_recommendations(limit:int=100):
+        items=_enrich_calls(_moneycontrol_calls())
+        if not items:
+            return {'generated_at':datetime.now(timezone.utc).isoformat(),'items':[],'data_source':'Moneycontrol Broker Research','message':'No public broker/analyst calls could be parsed from the source right now.','disclaimer':'Third-party research only; not StockPulse investment advice.'}
+        items.sort(key=lambda x:(x.get('date',''),x.get('upside_pct') or -999),reverse=True)
+        return {'generated_at':datetime.now(timezone.utc).isoformat(),'items':items[:max(1,min(limit,200))],'data_source':'Moneycontrol Broker Research (public research listings)','disclaimer':'Third-party research only; not StockPulse investment advice.'}
 
     app.include_router(router)
