@@ -11,56 +11,41 @@
   function installHomeMenu(){
     const hero=document.querySelector('#home .dashHero');
     if(!hero||document.getElementById('homeMenu'))return;
-    hero.insertAdjacentHTML('afterend','<div id="homeMenu" class="homeMenu"><button class="menuTile" onclick="setTab(\'home\')"><span class="menuIcon">⌂</span><span>Dashboard</span></button><button class="menuTile" onclick="setTab(\'screen\')"><span class="menuIcon">⌕</span><span>Screener</span></button><button class="menuTile" onclick="setTab(\'watch\')"><span class="menuIcon">★</span><span>Portfolio</span></button><button class="menuTile" onclick="setTab(\'market\')"><span class="menuIcon">◈</span><span>Live Market</span></button></div>');
+    hero.insertAdjacentHTML('afterend','<div id="homeMenu" class="homeMenu"><button class="menuTile" onclick="setTab(\'home\')"><span class="menuIcon">⌂</span><span>Dashboard</span></button><button class="menuTile" onclick="setTab(\'screen\')"><span class="menuIcon">⌕</span><span>Screener</span></button><button class="menuTile" onclick="setTab(\'watch\')"><span class="menuIcon">★</span><span>Watchlist</span></button><button class="menuTile" onclick="setTab(\'market\')"><span class="menuIcon">◈</span><span>Live Market</span></button></div>');
+    document.querySelectorAll('.tabs button[data-tab="watch"]').forEach(b=>{b.childNodes[0].textContent='Watchlist ';});
+    const header=[...document.querySelectorAll('.headerActions button')].find(b=>b.textContent.includes('Watchlist')||b.textContent.includes('portfolio')); if(header)header.textContent='Watchlist';
   }
-  async function feed(symbol, query){
-    const rss=NEWS_BASE+encodeURIComponent(symbol+' '+query);
-    const r=await fetch(NEWS_PROXY+encodeURIComponent(rss));
-    if(!r.ok) throw Error('news '+r.status);
-    const d=await r.json();
+  function watchPeriodValue(x,key){
+    if(key==='today')return Number(x.change_pct)||0;
+    const p=x.period_returns||{}; const m=key.match(/^(days|weeks|months|years):(\d+)$/); if(!m)return 0;
+    return Number((p[m[1]]||{})[m[2]])||0;
+  }
+  function watchPeriodLabel(key){
+    if(key==='today')return 'Today';
+    const m=key.match(/^(days|weeks|months|years):(\d+)$/); if(!m)return key;
+    const n=Number(m[2]),u=m[1]==='days'?'Day':m[1]==='weeks'?'Week':m[1]==='months'?'Month':'Year'; return n+' '+u+(n===1?'':'s');
+  }
+  function renderWatchlist(){
+    const box=document.getElementById('watchGrid'); if(!box)return;
+    const saved=new Set(watch()); const rows=all.filter(x=>saved.has(x.symbol)); const current=window._watchPeriod||'today';
+    const opts=[['today','Today'],...Array.from({length:30},(_,i)=>['days:'+(i+1),(i+1)+' Day'+(i?'s':'')]),...Array.from({length:12},(_,i)=>['weeks:'+(i+1),(i+1)+' Week'+(i?'s':'')]),...Array.from({length:12},(_,i)=>['months:'+(i+1),(i+1)+' Month'+(i?'s':'')]),...Array.from({length:5},(_,i)=>['years:'+(i+1),(i+1)+' Year'+(i?'s':'')])];
+    box.innerHTML='<div class="watchControls"><div><b>Watchlist price variation</b><span>Compare 1–30 days, 1–12 weeks, 1–12 months or 1–5 years</span></div><select id="watchPeriod">'+opts.map(o=>'<option value="'+o[0]+'" '+(o[0]===current?'selected':'')+'>'+o[1]+'</option>').join('')+'</select></div>'+(rows.length?'<div class="watchList">'+rows.map(x=>{const v=watchPeriodValue(x,current);return '<article class="watchRow" onclick="openDetail(\''+x.symbol+'\')"><div class="watchSymbol"><b>'+x.symbol+'</b><span>₹'+num(x.price).toLocaleString('en-IN')+'</span></div><div class="watchVariation '+(v<0?'down':'up')+'">'+(v>=0?'+':'')+v.toFixed(2)+'%<small>'+watchPeriodLabel(current)+'</small></div><button class="watchRemove" onclick="event.stopPropagation();toggleWatch(\''+x.symbol+'\')">×</button></article>'}).join('')+'</div>':'<div class="empty">Your watchlist is empty. Open a stock and tap Add to Watchlist.</div>');
+    const sel=document.getElementById('watchPeriod'); if(sel)sel.onchange=()=>{window._watchPeriod=sel.value;renderWatchlist()};
+  }
+  async function feed(symbol,query){
+    const rss=NEWS_BASE+encodeURIComponent(symbol+' '+query); const r=await fetch(NEWS_PROXY+encodeURIComponent(rss)); if(!r.ok)throw Error('news '+r.status); const d=await r.json();
     return (d.items||[]).slice(0,20).map(x=>({title:cleanTitle(x.title),link:x.link,date:x.pubDate,source:x.author||d.feed?.title||'News'}));
   }
   function classify(items){return uniq(items).map(n=>({...n,type:recommendationWords.test(n.title)?'Recommendation':filingWords.test(n.title)?'Filing / Announcement':catalystWords.test(n.title)?'Catalyst':'Market News'}));}
-  function newsBlock(items, empty){
-    if(!items.length) return '<div class="newsEmpty">'+empty+'</div>';
-    return '<div class="newsList">'+items.map(n=>'<a class="newsItem" href="'+esc(n.link)+'" target="_blank" rel="noopener"><b>'+esc(n.title)+'</b><span><em>'+esc(n.type||'News')+'</em> '+esc(n.source)+' • '+new Date(n.date).toLocaleString('en-IN')+'</span></a>').join('')+'</div>';
-  }
+  function newsBlock(items,empty){if(!items.length)return '<div class="newsEmpty">'+empty+'</div>';return '<div class="newsList">'+items.map(n=>'<a class="newsItem" href="'+esc(n.link)+'" target="_blank" rel="noopener"><b>'+esc(n.title)+'</b><span><em>'+esc(n.type||'News')+'</em> '+esc(n.source)+' • '+new Date(n.date).toLocaleString('en-IN')+'</span></a>').join('')+'</div>';}
   window.loadStockNews=async function(symbol){
-    const box=document.getElementById('stockNews'); if(!box)return;
-    box.innerHTML='<div class="newsLoading">Collecting A-to-Z news, filings and market information…</div>';
-    try{
-      const queries=['','NSE BSE SEBI filing announcement disclosure exchange','results earnings revenue profit guidance','buy sell target price brokerage analyst upgrade downgrade','order contract deal partnership capex acquisition expansion','dividend bonus split buyback corporate action','regulatory legal approval management promoter','stock market sector industry outlook'];
-      const results=await Promise.allSettled(queries.map(q=>feed(symbol,q)));
-      const merged=classify(uniq(results.flatMap(r=>r.status==='fulfilled'?r.value:[])));
-      const rec=merged.filter(x=>x.type==='Recommendation'),filings=merged.filter(x=>x.type==='Filing / Announcement'),catalysts=merged.filter(x=>x.type==='Catalyst'),market=merged.filter(x=>x.type==='Market News');
-      const sets={all:merged,recommendation:rec,filings,catalysts,market};
-      box.innerHTML='<div class="newsTabs"><button class="newsTab active" data-n="all">All News</button><button class="newsTab" data-n="recommendation">Recommendations</button><button class="newsTab" data-n="filings">NSE/BSE/SEBI</button><button class="newsTab" data-n="catalysts">Company/Catalysts</button><button class="newsTab" data-n="market">Market</button></div><div class="newsSummary"><b>'+merged.length+'</b> relevant items collected • recommendations '+rec.length+' • filings '+filings.length+' • catalysts '+catalysts.length+'</div><div id="newsContent">'+newsBlock(merged,'No recent news found.')+'</div>';
-      box.querySelectorAll('.newsTab').forEach(b=>b.onclick=()=>{box.querySelectorAll('.newsTab').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('newsContent').innerHTML=newsBlock(sets[b.dataset.n],b.dataset.n==='recommendation'?'No explicit recommendation-related news found.':b.dataset.n==='filings'?'No recent filing/announcement news found.':'No recent news found.')});
-    }catch(e){box.innerHTML='<div class="newsEmpty">News collection is temporarily unavailable. <a target="_blank" rel="noopener" href="https://news.google.com/search?q='+encodeURIComponent(symbol)+'">Open latest '+esc(symbol)+' news</a></div>';}
+    const box=document.getElementById('stockNews');if(!box)return;box.innerHTML='<div class="newsLoading">Collecting A-to-Z news, filings and market information…</div>';
+    try{const queries=['','NSE BSE SEBI filing announcement disclosure exchange','results earnings revenue profit guidance','buy sell target price brokerage analyst upgrade downgrade','order contract deal partnership capex acquisition expansion','dividend bonus split buyback corporate action','regulatory legal approval management promoter','stock market sector industry outlook'];const results=await Promise.allSettled(queries.map(q=>feed(symbol,q)));const merged=classify(uniq(results.flatMap(r=>r.status==='fulfilled'?r.value:[])));const rec=merged.filter(x=>x.type==='Recommendation'),filings=merged.filter(x=>x.type==='Filing / Announcement'),catalysts=merged.filter(x=>x.type==='Catalyst'),market=merged.filter(x=>x.type==='Market News');const sets={all:merged,recommendation:rec,filings,catalysts,market};box.innerHTML='<div class="newsTabs"><button class="newsTab active" data-n="all">All News</button><button class="newsTab" data-n="recommendation">Recommendations</button><button class="newsTab" data-n="filings">NSE/BSE/SEBI</button><button class="newsTab" data-n="catalysts">Company/Catalysts</button><button class="newsTab" data-n="market">Market</button></div><div class="newsSummary"><b>'+merged.length+'</b> relevant items collected • recommendations '+rec.length+' • filings '+filings.length+' • catalysts '+catalysts.length+'</div><div id="newsContent">'+newsBlock(merged,'No recent news found.')+'</div>';box.querySelectorAll('.newsTab').forEach(b=>b.onclick=()=>{box.querySelectorAll('.newsTab').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById('newsContent').innerHTML=newsBlock(sets[b.dataset.n],b.dataset.n==='recommendation'?'No explicit recommendation-related news found.':b.dataset.n==='filings'?'No recent filing/announcement news found.':'No recent news found.')});}catch(e){box.innerHTML='<div class="newsEmpty">News collection is temporarily unavailable. <a target="_blank" rel="noopener" href="https://news.google.com/search?q='+encodeURIComponent(symbol)+'">Open latest '+esc(symbol)+' news</a></div>';}
   };
-  async function loadLiveMarket(){
-    const box=document.getElementById('liveMarketBox'); if(!box)return;
-    try{
-      const r=await fetch(API+'/market/live?ts='+Date.now()); if(!r.ok)throw Error('market '+r.status);
-      const d=await r.json();
-      const items=d.items||[];
-      box.innerHTML='<div class="liveMarketHead"><div><h3>Live Market</h3><span>Indian indices • auto refresh '+(d.refresh_seconds||15)+' sec</span></div><span class="liveBadge"><i class="liveDot"></i>'+new Date(d.generated_at||Date.now()).toLocaleTimeString('en-IN')+'</span></div><div class="liveMarketGrid">'+items.map(x=>'<div class="liveIndex"><b>'+esc(x.name)+'</b><strong>₹'+Number(x.price||0).toLocaleString('en-IN',{maximumFractionDigits:2})+'</strong><span class="'+(Number(x.change_pct)<0?'down':'up')+'">'+(Number(x.change_pct)>=0?'+':'')+Number(x.change_pct||0).toFixed(2)+'%</span><small>'+esc(x.market_state||'Market')+'</small></div>').join('')+'</div><div class="liveMarketNote">Public quote feed • prices can be delayed depending on feed/exchange status. Last update '+new Date(d.generated_at||Date.now()).toLocaleString('en-IN')+'</div>';
-    }catch(e){box.innerHTML='<div class="newsEmpty">Live market feed is temporarily unavailable. Tap Refresh and try again.</div>';}
-  }
-  function installLiveMarket(){
-    const market=document.getElementById('market'); if(!market||document.getElementById('liveMarketBox'))return;
-    const cards=document.getElementById('marketCards');
-    if(cards)cards.insertAdjacentHTML('afterend','<section id="liveMarketBox" class="surface liveMarketSurface"><div class="newsLoading">Connecting to live market…</div></section>');
-    loadLiveMarket(); setInterval(loadLiveMarket,15000);
-  }
-  const original=window.openDetail;
-  window.openDetail=function(symbol){
-    original(symbol);
-    const body=document.getElementById('detailBody');
-    if(!body || document.getElementById('stockNews')) return;
-    body.insertAdjacentHTML('beforeend','<section id="stockNews" class="stockNews"><h3>A-to-Z news & market intelligence</h3><div class="newsLoading">Loading…</div></section>');
-    window.loadStockNews(symbol);
-  };
+  async function loadLiveMarket(){const box=document.getElementById('liveMarketBox');if(!box)return;try{const r=await fetch(API+'/market/live?ts='+Date.now());if(!r.ok)throw Error('market '+r.status);const d=await r.json();const items=d.items||[];box.innerHTML='<div class="liveMarketHead"><div><h3>Live Market</h3><span>Indian indices • auto refresh '+(d.refresh_seconds||15)+' sec</span></div><span class="liveBadge"><i class="liveDot"></i>'+new Date(d.generated_at||Date.now()).toLocaleTimeString('en-IN')+'</span></div><div class="liveMarketGrid">'+items.map(x=>'<div class="liveIndex"><b>'+esc(x.name)+'</b><strong>₹'+Number(x.price||0).toLocaleString('en-IN',{maximumFractionDigits:2})+'</strong><span class="'+(Number(x.change_pct)<0?'down':'up')+'">'+(Number(x.change_pct)>=0?'+':'')+Number(x.change_pct||0).toFixed(2)+'%</span><small>'+esc(x.market_state||'Market')+'</small></div>').join('')+'</div><div class="liveMarketNote">Public quote feed • prices can be delayed depending on feed/exchange status. Last update '+new Date(d.generated_at||Date.now()).toLocaleString('en-IN')+'</div>';}catch(e){box.innerHTML='<div class="newsEmpty">Live market feed is temporarily unavailable. Tap Refresh and try again.</div>';}}
+  function installLiveMarket(){const market=document.getElementById('market');if(!market||document.getElementById('liveMarketBox'))return;const cards=document.getElementById('marketCards');if(cards)cards.insertAdjacentHTML('afterend','<section id="liveMarketBox" class="surface liveMarketSurface"><div class="newsLoading">Connecting to live market…</div></section>');loadLiveMarket();setInterval(loadLiveMarket,15000);}
+  const original=window.openDetail;window.openDetail=function(symbol){original(symbol);const body=document.getElementById('detailBody');if(!body||document.getElementById('stockNews'))return;body.insertAdjacentHTML('beforeend','<section id="stockNews" class="stockNews"><h3>A-to-Z news & market intelligence</h3><div class="newsLoading">Loading…</div></section>');window.loadStockNews(symbol);};
+  window.renderWatch=renderWatchlist;
   function boot(){installHomeMenu();installLiveMarket();}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
