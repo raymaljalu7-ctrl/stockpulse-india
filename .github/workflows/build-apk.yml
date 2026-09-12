@@ -35,4 +35,4 @@ jobs:
           name: stockpulse-india-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
-# Keep APK build trigger available when the remotely loaded StockPulse UI is updated.
+# v3.4.4: visible navigation tiles + Android back-to-dashboard behavior.
