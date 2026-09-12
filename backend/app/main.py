@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__
 import hashlib, math, time, xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any
@@ -34,9 +34,6 @@ def _rows_to_universe(rows):
         out.append({"symbol":s,"price":p,"change_pct":num(x.get("pChange")),"dayHigh":num(x.get("dayHigh")),"dayLow":num(x.get("dayLow")),"yearHigh":num(x.get("yearHigh")),"yearLow":num(x.get("yearLow")),"volume":num(x.get("totalTradedVolume")),"perChange30d":num(x.get("perChange30d")),"perChange365d":num(x.get("perChange365d")),"companyName":meta.get("companyName") or x.get("companyName") or s,"industry":meta.get("industry") or x.get("industry") or "NSE listed equity","ffmc":num(x.get("ffmc"))})
     return out
 def live_universe():
-    # NSE can return a partial/50-stock breadth response from allstocks. Prefer the
-    # NIFTY 500 constituent feed first so a temporary all-stocks response can never
-    # silently reduce StockPulse to only NIFTY 50.
     d=nse_get("/api/equity-stockIndices",{"index":"NIFTY 500"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
     if len(out)>=300:return out
     d=nse_get("/api/equity-stock",{"index":"allstocks"},60);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
@@ -67,7 +64,6 @@ def health():
 @app.get("/api/screener/top")
 def top(limit:int=5000,min_quality:float=0):
     universe,live=current_universe();items=[snapshot(q,live) for q in universe if q["price"]>0];items=[x for x in items if x["final_rank_score"]>=min_quality];items.sort(key=lambda x:(x["short_term_score"],x["estimated_upside_pct"],x["final_rank_score"]),reverse=True)
-    # Always return the complete scanned universe. The UI may display a ranked subset, but scanning is market-wide.
     return {"generated_at":datetime.now(timezone.utc).isoformat(),"items":items,"universe_size":len(universe),"data_source":"NSE live" if live else "Fallback market snapshot"}
 @app.get("/api/stock/{symbol}")
 def stock(symbol:str):
@@ -97,3 +93,5 @@ def fno(symbol:str):return {"status":"unavailable","items":[],"message":"Live de
 
 from app.feature_routes import register_feature_routes
 register_feature_routes(app, nse_get, current_universe)
+from app.broker_routes import register_broker_routes
+register_broker_routes(app, nse_get)
