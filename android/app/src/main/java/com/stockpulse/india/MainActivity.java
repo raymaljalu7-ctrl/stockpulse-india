@@ -8,7 +8,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
-    private static final String APP_URL = "file:///android_asset/index.html";
+    private static final String APP_URL = "https://stockpulse-india-web.onrender.com/?app=4.2.0&v=20260912";
     private WebView webView;
 
     @Override public void onCreate(Bundle savedInstanceState) {
@@ -29,7 +29,7 @@ public class MainActivity extends Activity {
 
     @Override public void onBackPressed() {
         webView.evaluateJavascript(
-            "(function(){var m=document.getElementById('modal');if(m&&!m.classList.contains('hide')){m.classList.add('hide');return 'handled';}var p=['home','screen','watch','market'];for(var i=1;i<p.length;i++){var e=document.getElementById(p[i]);if(e&&!e.classList.contains('hide')){document.getElementById(p[i]).classList.add('hide');document.getElementById('home').classList.remove('hide');return 'handled';}}return 'exit';})()",
+            "(function(){var m=document.getElementById('detail')||document.getElementById('modal');if(m&&!m.classList.contains('hidden')&&!m.classList.contains('hide')){m.classList.add(m.classList.contains('hidden')?'hidden':'hide');return 'handled';}var p=['screen','watch','portfolio','market','movers','alerts'];for(var i=0;i<p.length;i++){var e=document.getElementById(p[i]);if(e&&!e.classList.contains('hidden')&&!e.classList.contains('hide')){e.classList.add(e.classList.contains('hidden')?'hidden':'hide');var h=document.getElementById('home');if(h)h.classList.remove(h.classList.contains('hidden')?'hidden':'hide');return 'handled';}}return 'exit';})()",
             value -> { if ("\"exit\"".equals(value)) finish(); }
         );
     }
