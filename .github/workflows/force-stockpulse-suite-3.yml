@@ -16,23 +16,26 @@ jobs:
           from pathlib import Path
           import re
           def blocks(path):
-              return re.findall(r"p\\.write_text\\(r'''(.*?)''', encoding='utf-8'\\)",Path(path).read_text(),re.S)
+              text=Path(path).read_text()
+              return re.findall(r"p\.write_text\(r'''(.*?)''', encoding='utf-8'\)", text, re.S)
           b=blocks('.github/workflows/implement-stockpulse-suite.yml')
           print('suite blocks',len(b))
+          if len(b) < 2: raise SystemExit('StockPulse suite payload not found')
           for x in b:
-              Path('backend/app/feature_routes.py' if 'def register_feature_routes' in x else 'web/stockpulse-suite.js').write_text(x)
+              Path('backend/app/feature_routes.py' if 'def register_feature_routes' in x else 'web/stockpulse-suite.js').write_text(x, encoding='utf-8')
           b=blocks('.github/workflows/add-broker-calls.yml')
           print('broker blocks',len(b))
+          if len(b) < 2: raise SystemExit('Broker calls payload not found')
           for x in b:
-              Path('backend/app/broker_routes.py' if 'def broker_recommendations' in x else 'web/broker-calls.js').write_text(x)
+              Path('backend/app/broker_routes.py' if 'def broker_recommendations' in x else 'web/broker-calls.js').write_text(x, encoding='utf-8')
           m=Path('backend/app/main.py'); s=m.read_text()
           if 'feature_routes import register_feature_routes' not in s: s+='\nfrom app.feature_routes import register_feature_routes\nregister_feature_routes(app, nse_get, current_universe)\n'
           if 'broker_routes import register_broker_routes' not in s: s+='\nfrom app.broker_routes import register_broker_routes\nregister_broker_routes(app, nse_get)\n'
-          m.write_text(s)
+          m.write_text(s, encoding='utf-8')
           w=Path('web/index.html'); s=w.read_text()
           for t in ['<script src="/stockpulse-suite.js"></script>','<script src="/broker-calls.js"></script>']:
               if t not in s: s=s.replace('</body>',t+'</body>')
-          w.write_text(s)
+          w.write_text(s, encoding='utf-8')
           PY
       - name: Validate Python
         run: python -m py_compile backend/app/main.py backend/app/feature_routes.py backend/app/broker_routes.py
