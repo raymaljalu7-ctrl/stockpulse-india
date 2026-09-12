@@ -1,0 +1,31 @@
+name: Apply StockPulse web suite
+on:
+  push:
+    paths:
+      - 'scripts/apply-suite.trigger'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch web entry
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('web/index.html'); s=p.read_text()
+          tags=['<script src="/stockpulse-suite.js"></script>','<script src="/broker-calls.js"></script>']
+          for t in tags:
+              if t not in s: s=s.replace('</body>',t+'</body>')
+          if 'id="broker-calls"' not in s:
+              marker='<section id="broker-calls" class="section"><div class="hero"><div><h1>Broker & Analyst Calls</h1><p class="muted">Public broker and analyst views, kept separate from StockPulse scoring.</p></div></div></section>'
+              s=s.replace('</main>',marker+'</main>')
+          p.write_text(s)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/index.html
+          git diff --cached --quiet || git commit -m "Enable StockPulse web intelligence modules"
+          git push
