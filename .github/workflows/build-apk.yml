@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'android/**'
+      - 'web/**'
       - '.github/workflows/build-apk.yml'
 
 jobs:
@@ -35,4 +36,4 @@ jobs:
           name: stockpulse-india-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
-# v3.4.4: visible navigation tiles + Android back-to-dashboard behavior.
+# v4.0: rebuild APK whenever the web UI changes so the installed app stays current.
