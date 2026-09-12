@@ -12,7 +12,7 @@ import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="StockPulse India API", version="4.5")
+app = FastAPI(title="StockPulse India API", version="4.5.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 NIFTY50=["ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJFINANCE","BAJAJFINSV","BEL","BHARTIARTL","BPCL","BRITANNIA","CIPLA","COALINDIA","DIVISLAB","DRREDDY","EICHERMOT","ETERNAL","GRASIM","HCLTECH","HDFCBANK","HDFCLIFE","HEROMOTOCO","HINDALCO","HINDUNILVR","ICICIBANK","INDUSINDBK","INFY","ITC","JIOFIN","JSWSTEEL","KOTAKBANK","LT","M&M","MARUTI","NESTLEIND","NTPC","ONGC","POWERGRID","RELIANCE","SBILIFE","SBIN","SHRIRAMFIN","SUNPHARMA","TATACONSUM","TATAMOTORS","TATASTEEL","TCS","TECHM","TITAN","TRENT","ULTRACEMCO"]
@@ -67,7 +67,7 @@ def snapshot(q:dict,live:bool):
 
 @app.get("/health")
 def health():
-    _,live=current_universe(); return {"status":"ok","service":"stockpulse-india-api","version":"4.5","data_source":"NSE live" if live else "fallback"}
+    _,live=current_universe(); return {"status":"ok","service":"stockpulse-india-api","version":"4.5.1","data_source":"NSE live" if live else "fallback"}
 
 @app.get("/api/screener/top")
 def top(limit:int=50,min_quality:float=0):
@@ -92,11 +92,20 @@ def news(symbol:str,limit:int=12):
 
 @app.get("/api/market")
 def market():
-    data=nse_get("/api/allIndices",ttl=30); rows=(data or {}).get("data",[]) if isinstance(data,dict) else []; result=[]
+    data=nse_get("/api/allIndices",ttl=30); rows=(data or {}).get("data",[]) if isinstance(data,dict) else []
+    result=[]
     for x in rows:
-        if x.get("index") in {"NIFTY 50","NIFTY BANK"} or x.get("indexSymbol") in {"NIFTY","NIFTY BANK"}:result.append({"symbol":x.get("index") or x.get("indexSymbol"),"price":num(x.get("last")),"change_pct":num(x.get("percentChange"))})
-    if not result:result=[{"symbol":"NIFTY 50","price":25000,"change_pct":0},{"symbol":"NIFTY BANK","price":55000,"change_pct":0}]
-    return {"generated_at":datetime.now(timezone.utc).isoformat(),"indices":result,"data_source":"NSE live" if data else "Fallback market snapshot"}
+        if x.get("index") in {"NIFTY 50","NIFTY BANK"} or x.get("indexSymbol") in {"NIFTY","NIFTY BANK"}:
+            result.append({"symbol":"NIFTY 50" if (x.get("index") or x.get("indexSymbol"))=="NIFTY 50" else (x.get("index") or x.get("indexSymbol")),"price":num(x.get("last")),"change_pct":num(x.get("percentChange"))})
+    if not any(x.get("symbol")=="NIFTY 50" for x in result):
+        result.insert(0,{"symbol":"NIFTY 50","price":None,"change_pct":None})
+    if not any(x.get("symbol")=="NIFTY BANK" for x in result):
+        result.append({"symbol":"NIFTY BANK","price":None,"change_pct":None})
+    # SENSEX is deliberately exposed even when the deployment has no authorized BSE feed.
+    # Null means unavailable; StockPulse never fabricates an index value.
+    sensex=next((x for x in rows if str(x.get("index") or "").upper()=="SENSEX"),None)
+    result.append({"symbol":"SENSEX","price":num(sensex.get("last")) if sensex else None,"change_pct":num(sensex.get("percentChange")) if sensex else None})
+    return {"generated_at":datetime.now(timezone.utc).isoformat(),"indices":result,"data_source":"NSE live + BSE when available" if data else "Fallback market snapshot; SENSEX unavailable without BSE feed"}
 
 @app.get("/api/fno/{symbol}")
 def fno(symbol:str):return {"status":"unavailable","items":[],"message":"Live derivative feed is not enabled in this personal-use build."}
