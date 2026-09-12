@@ -1,4 +1,4 @@
-from __future__
+from __future__ import annotations
 import hashlib, math, time, xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any
@@ -39,10 +39,8 @@ def _rows_to_universe(rows):
         out.append({"symbol":s,"price":p,"change_pct":num(x.get("pChange") or pi.get("pChange")),"dayHigh":num(x.get("dayHigh") or pi.get("high")),"dayLow":num(x.get("dayLow") or pi.get("low")),"yearHigh":num(x.get("yearHigh") or (pi.get("weekHighLow") or {}).get("max")),"yearLow":num(x.get("yearLow") or (pi.get("weekHighLow") or {}).get("min")),"volume":num(x.get("totalTradedVolume") or pi.get("totalTradedVolume")),"perChange30d":num(x.get("perChange30d")),"perChange365d":num(x.get("perChange365d")),"companyName":meta.get("companyName") or x.get("companyName") or s,"industry":meta.get("industry") or x.get("industry") or "NSE listed equity","ffmc":num(x.get("ffmc"))})
     d={x["symbol"]:x for x in out};return list(d.values())
 def live_universe():
-    # ALL pre-open is the broadest live NSE equity feed when available.
     d=nse_get("/api/market-data-pre-open",{"key":"ALL"},30);out=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
     if len(out)>=300:return out
-    # Build a broad union of major NSE equity universes instead of falling to NIFTY 50.
     names=["NIFTY 500","NIFTY NEXT 50","NIFTY MIDCAP 150","NIFTY SMALLCAP 250","NIFTY MICROCAP 250","NIFTY MIDCAP 50","NIFTY MIDCAP SELECT"]
     merged={x["symbol"]:x for x in out}
     for name in names:
@@ -50,11 +48,9 @@ def live_universe():
         for x in rows:merged[x["symbol"]]=x
     out=list(merged.values())
     if len(out)>=100:return out
-    # NSE allstocks is a final broad-market attempt.
     d=nse_get("/api/equity-stock",{"index":"allstocks"},60);rows=_rows_to_universe((d or {}).get("data",[]) if isinstance(d,dict) else [])
     for x in rows:merged[x["symbol"]]=x
     out=list(merged.values())
-    if len(out)>=100:return out
     return out
 def fallback_universe():
     out=[]
