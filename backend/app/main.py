@@ -7,7 +7,7 @@ import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.universe_loader import load_universe
-app=FastAPI(title="StockPulse India API",version="4.6.4")
+app=FastAPI(title="StockPulse India API",version="4.6.5")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 NIFTY50=["ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJFINANCE","BAJAJFINSV","BEL","BHARTIARTL","BPCL","BRITANNIA","CIPLA","COALINDIA","DIVISLAB","DRREDDY","EICHERMOT","ETERNAL","GRASIM","HCLTECH","HDFCBANK","HDFCLIFE","HEROMOTOCO","HINDALCO","HINDUNILVR","ICICIBANK","INDUSINDBK","INFY","ITC","JIOFIN","JSWSTEEL","KOTAKBANK","LT","M&M","MARUTI","NESTLEIND","NTPC","ONGC","POWERGRID","RELIANCE","SBILIFE","SBIN","SHRIRAMFIN","SUNPHARMA","TATACONSUM","TATAMOTORS","TATASTEEL","TCS","TECHM","TITAN","TRENT","ULTRACEMCO"]
 HEADERS={"User-Agent":"Mozilla/5.0","Accept":"application/json,text/plain,*/*","Referer":"https://www.nseindia.com/","Accept-Language":"en-US,en;q=0.9"}
@@ -72,7 +72,7 @@ def snapshot(q:dict,live:bool):
     return {"symbol":q["symbol"],"company_name":q["companyName"],"sector":q["industry"],"industry":q["industry"],"price":round(p,2),"change_pct":round(q["change_pct"],2),"final_rank_score":round(score,1),"band":band,"return_20d_pct":round(r30,2),"return_60d_pct":round(r30*1.25,2),"return_1y_pct":round(r365,2),"52w_position":round(pos,1),"volume_today":q["volume"],"volume_change_pct":8.0,"rsi14":round(max(30,min(75,50+r30*.8)),1),"dma20":round(p/(1+r30/100*.4),2),"dma50":round(p/(1+r30/100*.7),2),"dma200":round(p/(1+r365/100*.35),2),"pe":None,"pb":None,"roe":None,"roce":None,"debt_to_equity":None,"profit_margin":None,"market_cap":q["ffmc"],"book_value":None,"dividend_yield":None,"short_term_score":round(short_term,1),"medium_term_score":round((momentum+technical+pos)/3,1),"long_term_score":round((technical+pos+50)/3,1),"estimated_upside_pct":round(upside,1),"recommendation":short_rec,"risk":"Medium","why":reasons,"period_returns":{"days":{"1":round(q["change_pct"],2)},"weeks":{"1":round(r30/4.3,2)},"months":{"1":round(r30,2)},"years":{"1":round(r365,2)}},"data_source":"NSE live" if live else "Fallback market snapshot"}
 @app.get("/health")
 def health():
-    universe,live=current_universe();return {"status":"ok","service":"stockpulse-india-api","version":"4.6.4","data_source":"NSE live" if live else "fallback","universe_size":len(universe)}
+    universe,live=current_universe();return {"status":"ok","service":"stockpulse-india-api","version":"4.6.5","data_source":"NSE live" if live else "fallback","universe_size":len(universe)}
 @app.get("/api/screener/top")
 def top(limit:int=5000,min_quality:float=0):
     universe,live=current_universe();items=[snapshot(q,live) for q in universe if q["price"]>0];items=[x for x in items if x["final_rank_score"]>=min_quality];items.sort(key=lambda x:(x["short_term_score"],x["estimated_upside_pct"],x["final_rank_score"]),reverse=True)
@@ -110,3 +110,9 @@ def market():
     return {"generated_at":datetime.now(timezone.utc).isoformat(),"indices":result,"data_source":"NSE live + BSE SENSEX live" if sx["price"] else "NSE live; BSE SENSEX unavailable"}
 @app.get("/api/fno/{symbol}")
 def fno(symbol:str):return {"status":"unavailable","items":[],"message":"Live derivative feed is not enabled in this personal-use build."}
+
+# Register the feature and broker routes after the base helpers/endpoints exist.
+from app.feature_routes import register_feature_routes
+from app.broker_routes import register_broker_routes
+register_feature_routes(app,nse_get,current_universe)
+register_broker_routes(app,nse_get)
