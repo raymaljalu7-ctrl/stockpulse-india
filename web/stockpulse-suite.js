@@ -24,9 +24,9 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
       const r=await fetch(api+'/screener/top?limit=5000&min_quality=0',{cache:'no-store'});
       if(!r.ok) throw Error(r.status);
       const d=await r.json();
-      window.all=d.items||[];
+      all=d.items||[];
       const status=document.getElementById('status');
-      if(status) status.textContent='Updated '+new Date(d.generated_at||Date.now()).toLocaleTimeString()+' • '+window.all.length+' stocks';
+      if(status) status.textContent='Updated '+new Date(d.generated_at||Date.now()).toLocaleTimeString()+' • '+all.length+' stocks';
       if(typeof window.render==='function') window.render();
       if(!document.getElementById('market')?.classList.contains('hidden') && typeof window.renderMarket==='function') window.renderMarket();
     }catch(e){ if(typeof originalLoad==='function') originalLoad(); }
