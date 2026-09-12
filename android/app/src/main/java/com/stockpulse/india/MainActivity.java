@@ -8,7 +8,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
-    private static final String APP_URL = "https://stockpulse-india-web.onrender.com/?app=3.4.4";
+    private static final String APP_URL = "https://stockpulse-india-web.onrender.com/?app=4.0";
     private WebView webView;
 
     @Override public void onCreate(Bundle savedInstanceState) {
