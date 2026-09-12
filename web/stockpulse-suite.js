@@ -14,3 +14,22 @@ window.planOrder=()=>{const symbol=(document.getElementById('os')?.value||'').tr
 function init(){['dividends','corporate','analytics','orders'].forEach((id,i)=>addTab(id,['Dividends','Corporate Actions','Analytics','Order Planner'][i]));['dividends','corporate','analytics','orders'].forEach((id,i)=>addSection(id,['Dividends','Corporate Actions','Stock Analytics','Order Planner'][i],['Dividend history, yield screening and upcoming dates.','Dividend, bonus, split, rights, buyback and board-meeting intelligence.','Deep stock analysis and recommendation framework.','Buy/sell planning, quantities, prices and portfolio workflow.'][i]));bindTabs()}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
+
+// StockPulse web universe hotfix: request the full broad-universe result instead of 100 rows.
+(()=>{
+  const api='https://stockpulse-india-api-v3.onrender.com/api';
+  const originalLoad=window.load;
+  window.load=async function(){
+    try{
+      const r=await fetch(api+'/screener/top?limit=5000&min_quality=0',{cache:'no-store'});
+      if(!r.ok) throw Error(r.status);
+      const d=await r.json();
+      window.all=d.items||[];
+      const status=document.getElementById('status');
+      if(status) status.textContent='Updated '+new Date(d.generated_at||Date.now()).toLocaleTimeString()+' • '+window.all.length+' stocks';
+      if(typeof window.render==='function') window.render();
+      if(!document.getElementById('market')?.classList.contains('hidden') && typeof window.renderMarket==='function') window.renderMarket();
+    }catch(e){ if(typeof originalLoad==='function') originalLoad(); }
+  };
+  window.load();
+})();
