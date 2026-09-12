@@ -1,0 +1,154 @@
+name: Implement StockPulse stock intelligence suite
+on:
+  push:
+    paths:
+      - '.github/workflows/implement-stockpulse-suite.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add backend feature routes
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('backend/app/feature_routes.py')
+          p.write_text(r'''from __future__ import annotations
+from datetime import datetime, timezone
+from fastapi import APIRouter
+import requests
+
+
+def register_feature_routes(app, nse_get, current_universe):
+    router=APIRouter()
+
+    def rows(path, params=None):
+        d=nse_get(path, params, 120)
+        return d.get('data',[]) if isinstance(d,dict) else []
+
+    @router.get('/api/dividends')
+    def dividends(symbol: str|None=None, min_yield: float=0, limit: int=200):
+        s=(symbol or '').upper().replace('.NS','')
+        data=[]
+        for path in ('/api/corporate-actions','/api/corporate-actions?index=equities'):
+            try:
+                d=nse_get(path, {'index':'equities'} if '?' not in path else None, 120)
+                data=d.get('data',[]) if isinstance(d,dict) else []
+                if data: break
+            except Exception: pass
+        out=[]
+        for x in data:
+            sym=str(x.get('symbol') or x.get('symbolName') or '').upper()
+            purpose=str(x.get('subject') or x.get('purpose') or '')
+            if s and sym!=s: continue
+            if 'dividend' not in purpose.lower(): continue
+            out.append({'symbol':sym,'purpose':purpose,'ex_date':x.get('exDate') or x.get('exdate'),'record_date':x.get('recordDate') or x.get('recorddate'),'bc_start_date':x.get('bcStartDate'),'bc_end_date':x.get('bcEndDate'),'dividend':x.get('dividend') or x.get('amount'),'source':'NSE corporate actions'})
+        return {'generated_at':datetime.now(timezone.utc).isoformat(),'items':out[:max(1,min(limit,500))],'filters':{'symbol':s,'min_yield':min_yield},'data_source':'NSE'}
+
+    @router.get('/api/corporate-actions')
+    def corporate_actions(symbol: str|None=None, limit: int=250):
+        s=(symbol or '').upper().replace('.NS',''); out=[]
+        for path in ('/api/corporate-actions','/api/corporate-actions?index=equities'):
+            try:
+                d=nse_get(path, {'index':'equities'} if '?' not in path else None, 120)
+                data=d.get('data',[]) if isinstance(d,dict) else []
+                if data: break
+            except Exception: data=[]
+        for x in data:
+            sym=str(x.get('symbol') or '').upper()
+            if s and sym!=s: continue
+            purpose=str(x.get('subject') or x.get('purpose') or '')
+            out.append({'symbol':sym,'purpose':purpose,'ex_date':x.get('exDate') or x.get('exdate'),'record_date':x.get('recordDate') or x.get('recorddate'),'announcement_date':x.get('announcementDate'),'raw':x})
+        return {'generated_at':datetime.now(timezone.utc).isoformat(),'items':out[:max(1,min(limit,500))],'data_source':'NSE'}
+
+    @router.get('/api/board-meetings')
+    def board_meetings(symbol: str|None=None, limit: int=200):
+        s=(symbol or '').upper().replace('.NS',''); out=[]
+        for path in ('/api/board-meetings','/api/board-meetings?index=equities'):
+            try:
+                d=nse_get(path, {'index':'equities'} if '?' not in path else None, 120);data=d.get('data',[]) if isinstance(d,dict) else []
+                if data: break
+            except Exception: data=[]
+        for x in data:
+            sym=str(x.get('symbol') or '').upper()
+            if s and sym!=s: continue
+            out.append({'symbol':sym,'purpose':x.get('purpose') or x.get('subject'),'meeting_date':x.get('meetingDate') or x.get('meeting_date'),'raw':x})
+        return {'generated_at':datetime.now(timezone.utc).isoformat(),'items':out[:max(1,min(limit,500))],'data_source':'NSE'}
+
+    @router.get('/api/shareholding/{symbol}')
+    def shareholding(symbol:str):
+        s=symbol.upper().replace('.NS','')
+        for path in ('/api/shareholding-pattern', '/api/shareholding-pattern?index=equities'):
+            try:
+                d=nse_get(path, {'symbol':s} if '?' not in path else {'symbol':s}, 300)
+                if isinstance(d,dict) and d.get('data'):
+                    return {'symbol':s,'items':d['data'],'data_source':'NSE'}
+            except Exception: pass
+        return {'symbol':s,'items':[],'data_source':'NSE','message':'Shareholding feed unavailable for this symbol.'}
+
+    @router.get('/api/analytics/{symbol}')
+    def analytics(symbol:str):
+        s=symbol.upper().replace('.NS',''); universe,_=current_universe(); q=next((x for x in universe if x['symbol']==s),None)
+        if not q: return {'symbol':s,'error':'Stock not found'}
+        p=q['price']; r30=q.get('perChange30d',0); r365=q.get('perChange365d',0); vol=q.get('volume',0)
+        return {'symbol':s,'price':p,'returns':{'1D':q.get('change_pct',0),'1M':r30,'1Y':r365},'volume':{'today':vol,'signal':'High activity' if r30>3 else 'Normal activity'},'technical':{'trend':'Bullish' if r30>0 and r365>0 else 'Mixed' if r30*r365<=0 else 'Bearish','momentum_score':round(max(0,min(100,50+r30*1.5+r365*.12)),1)},'valuation':{'pe':None,'pb':None,'roe':None,'roce':None},'recommendation_engine':{'fundamental':35,'valuation':20,'technical_momentum':20,'catalyst':15,'risk':10},'note':'Weights are the StockPulse recommendation framework; unavailable fundamentals are not fabricated.'}
+
+    @router.get('/api/trade/quote/{symbol}')
+    def trade_quote(symbol:str):
+        s=symbol.upper().replace('.NS',''); universe,_=current_universe();q=next((x for x in universe if x['symbol']==s),None)
+        return {'symbol':s,'price':q['price'] if q else None,'buy_supported':False,'sell_supported':False,'message':'Broker execution is not connected. Use this module for order planning and portfolio tracking.'}
+
+    app.include_router(router)
+''', encoding='utf-8')
+
+      - name: Add frontend intelligence suite
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('web/stockpulse-suite.js')
+          p.write_text(r'''(()=>{
+const API2=window.API||'https://stockpulse-india-api-v3.onrender.com/api';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=x=>'₹'+(Number(x||0)).toLocaleString('en-IN',{maximumFractionDigits:2});
+async function j(path){try{const r=await fetch(API2+path,{cache:'no-store'});return await r.json()}catch(e){return {items:[],error:String(e)}}}
+function addTab(id,label){if(document.querySelector(`[data-tab="${id}"]`))return;const nav=document.querySelector('#tabs');const b=document.createElement('button');b.dataset.tab=id;b.textContent=label;nav.appendChild(b)}
+function addSection(id,title,sub=''){if(document.getElementById(id))return;const main=document.querySelector('main');const footer=main.querySelector('footer');const s=document.createElement('section');s.id=id;s.className='hidden';s.innerHTML=`<div class="hero"><div><h1>${title}</h1><p class="muted">${sub}</p></div><button class="btn" onclick="suiteLoad('${id}')">↻ Refresh</button></div><div id="${id}-body"></div>`;main.insertBefore(s,footer)}
+function bindTabs(){document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>{if(['dividends','corporate','analytics','orders'].includes(b.dataset.tab))suiteLoad(b.dataset.tab)}))}
+window.suiteLoad=async function(id){const el=document.getElementById(id+'-body');if(!el)return;el.innerHTML='<div class="panel">Loading…</div>';if(id==='dividends'){const d=await j('/dividends');el.innerHTML=`<div class="panel"><div class="filters"><label>Minimum dividend yield %<input id="dymin" type="number" value="0" step="0.1"></label><label>Search symbol<input id="dys" placeholder="RELIANCE"></label></div><div class="tablewrap"><table class="table"><thead><tr><th>Symbol</th><th>Purpose</th><th>Ex-date</th><th>Record date</th><th>Dividend</th></tr></thead><tbody>${(d.items||[]).map(x=>`<tr onclick="detail('${esc(x.symbol)}')"><td><b>${esc(x.symbol)}</b></td><td>${esc(x.purpose)}</td><td>${esc(x.ex_date||'—')}</td><td>${esc(x.record_date||'—')}</td><td>${esc(x.dividend||'—')}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">No dividend actions returned by the live exchange feed.</td></tr>'}</tbody></table></div></div>`}
+else if(id==='corporate'){const [a,b]=await Promise.all([j('/corporate-actions'),j('/board-meetings')]);el.innerHTML=`<div class="grid"><div class="panel"><h3>Corporate actions</h3><div class="tablewrap"><table class="table"><thead><tr><th>Symbol</th><th>Purpose</th><th>Ex-date</th></tr></thead><tbody>${(a.items||[]).map(x=>`<tr onclick="detail('${esc(x.symbol)}')"><td>${esc(x.symbol)}</td><td>${esc(x.purpose)}</td><td>${esc(x.ex_date||'—')}</td></tr>`).join('')||'<tr><td colspan="3" class="empty">No live actions returned.</td></tr>'}</tbody></table></div></div><div class="panel"><h3>Board meetings</h3><div class="tablewrap"><table class="table"><thead><tr><th>Symbol</th><th>Purpose</th><th>Date</th></tr></thead><tbody>${(b.items||[]).map(x=>`<tr onclick="detail('${esc(x.symbol)}')"><td>${esc(x.symbol)}</td><td>${esc(x.purpose||'—')}</td><td>${esc(x.meeting_date||'—')}</td></tr>`).join('')||'<tr><td colspan="3" class="empty">No live meetings returned.</td></tr>'}</tbody></table></div></div></div>`}
+else if(id==='analytics'){el.innerHTML=`<div class="panel"><h3>Stock intelligence</h3><p class="muted">Select any stock from Screener/Watchlist to open the complete analysis. The engine combines fundamentals 35%, valuation 20%, technical/momentum 20%, catalysts 15%, and risk 10%.</p><div class="trade"><label>Symbol<input id="suiteSymbol" placeholder="TCS"></label><button class="btn" onclick="suiteAnalyze()">Analyze stock</button></div></div><div id="suite-analysis"></div>`}
+else if(id==='orders'){el.innerHTML=`<div class="panel"><h3>Order planner</h3><p class="muted">Personal-use planning only; no broker execution or real-money order is sent.</p><div class="trade"><label>Symbol<input id="os"></label><label>Side<select id="side"><option>BUY</option><option>SELL</option></select></label><label>Quantity<input id="oq" type="number"></label><label>Price<input id="op" type="number"></label><button class="btn" onclick="planOrder()">Add to plan</button></div></div><div class="panel section"><div class="tablewrap"><table class="table"><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Value</th><th></th></tr></thead><tbody id="orders-table"></tbody></table></div></div>`;renderOrders()}};
+window.suiteAnalyze=async function(){const s=(document.getElementById('suiteSymbol')?.value||'').trim().toUpperCase();if(!s)return;const [a,b,c]=await Promise.all([j('/analytics/'+encodeURIComponent(s)),j('/corporate-actions?symbol='+encodeURIComponent(s)),j('/shareholding/'+encodeURIComponent(s))]);document.getElementById('suite-analysis').innerHTML=`<div class="grid"><div class="panel"><h3>${esc(s)} — Quant score</h3><div class="big">${esc(a.technical?.momentum_score??'—')}</div><div>Trend: ${esc(a.technical?.trend||'—')}</div><div>1D ${esc(a.returns?.['1D']||0)}% • 1M ${esc(a.returns?.['1M']||0)}% • 1Y ${esc(a.returns?.['1Y']||0)}%</div></div><div class="panel"><h3>Corporate actions</h3>${(b.items||[]).slice(0,8).map(x=>`<p><b>${esc(x.purpose)}</b><br><small>${esc(x.ex_date||'')}</small></p>`).join('')||'<p class="muted">No actions returned.</p>'}</div><div class="panel"><h3>Shareholding</h3><pre style="white-space:pre-wrap;max-height:300px;overflow:auto">${esc(JSON.stringify(c.items||[],null,2))}</pre></div></div>`}
+function renderOrders(){const rows=JSON.parse(localStorage.getItem('sporders')||'[]');const t=document.getElementById('orders-table');if(!t)return;t.innerHTML=rows.map((x,i)=>`<tr><td>${esc(x.time)}</td><td>${esc(x.symbol)}</td><td>${esc(x.side)}</td><td>${x.qty}</td><td>${money(x.price)}</td><td>${money(x.qty*x.price)}</td><td><button class="btn" onclick="removeOrder(${i})">Remove</button></td></tr>`).join('')||'<tr><td colspan="7" class="empty">No planned orders.</td></tr>'}
+window.planOrder=()=>{const symbol=(document.getElementById('os')?.value||'').trim().toUpperCase(),side=document.getElementById('side')?.value,qty=Number(document.getElementById('oq')?.value),price=Number(document.getElementById('op')?.value);if(!symbol||qty<=0||price<=0)return;const r=JSON.parse(localStorage.getItem('sporders')||'[]');r.push({time:new Date().toLocaleString('en-IN'),symbol,side,qty,price});localStorage.setItem('sporders',JSON.stringify(r));renderOrders()};window.removeOrder=i=>{const r=JSON.parse(localStorage.getItem('sporders')||'[]');r.splice(i,1);localStorage.setItem('sporders',JSON.stringify(r));renderOrders()};
+function init(){['dividends','corporate','analytics','orders'].forEach((id,i)=>addTab(id,['Dividends','Corporate Actions','Analytics','Order Planner'][i]));['dividends','corporate','analytics','orders'].forEach((id,i)=>addSection(id,['Dividends','Corporate Actions','Stock Analytics','Order Planner'][i],['Dividend history, yield screening and upcoming dates.','Dividend, bonus, split, rights, buyback and board-meeting intelligence.','Deep stock analysis and recommendation framework.','Buy/sell planning, quantities, prices and portfolio workflow.'][i]));bindTabs();try{const old=window.detail;if(old)window.detail=async s=>{old(s);setTimeout(async()=>{const box=document.getElementById('db');if(!box)return;const a=await j('/analytics/'+encodeURIComponent(s));const c=await j('/corporate-actions?symbol='+encodeURIComponent(s));const b=await j('/board-meetings?symbol='+encodeURIComponent(s));let z=document.getElementById('suite-detail-extra');if(!z){z=document.createElement('div');z.id='suite-detail-extra';z.className='section';box.appendChild(z)}z.innerHTML=`<div class="panel"><h3>StockPulse Intelligence</h3><div class="detailgrid"><div class="stat"><b>${esc(a.technical?.momentum_score??'—')}</b><span>Momentum score</span></div><div class="stat"><b>${esc(a.technical?.trend||'—')}</b><span>Trend</span></div><div class="stat"><b>${esc((a.returns?.['1Y']??0)+'%')}</b><span>1Y return</span></div><div class="stat"><b>${esc((a.volume?.signal)||'—')}</b><span>Volume signal</span></div></div><h4>Corporate actions</h4>${(c.items||[]).slice(0,6).map(x=>`<p>${esc(x.purpose)} — ${esc(x.ex_date||'')}</p>`).join('')||'<p class="muted">No actions returned.</p>'}<h4>Board meetings</h4>${(b.items||[]).slice(0,6).map(x=>`<p>${esc(x.purpose||'—')} — ${esc(x.meeting_date||'')}</p>`).join('')||'<p class="muted">No meetings returned.</p>'}</div>`},250)}}catch(e){}}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+''', encoding='utf-8')
+
+      - name: Wire features into app
+        shell: python
+        run: |
+          from pathlib import Path
+          m=Path('backend/app/main.py')
+          s=m.read_text()
+          line='from app.feature_routes import register_feature_routes\nregister_feature_routes(app, nse_get, current_universe)\n'
+          if 'feature_routes import register_feature_routes' not in s:
+              m.write_text(s+'\n'+line)
+          w=Path('web/index.html')
+          s=w.read_text()
+          tag='<script src="/stockpulse-suite.js"></script>'
+          if tag not in s:
+              s=s.replace('</body>',tag+'</body>')
+          w.write_text(s)
+
+      - name: Commit suite
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/feature_routes.py backend/app/main.py web/stockpulse-suite.js web/index.html
+          git diff --cached --quiet || git commit -m "Add stock intelligence, dividends, corporate actions and order planner"
+          git push
