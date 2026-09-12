@@ -28,3 +28,30 @@ async def market_live():
         rows=await __import__('asyncio').gather(*(one(client,n,s) for n,s in symbols.items()))
     items=[x for x in rows if x]
     return {'status':'live_market','market':'IN','generated_at':datetime.now(timezone.utc).isoformat(),'items':items,'refresh_seconds':15,'source':'Public market quote feed','note':'Quotes may be delayed depending on the public feed and exchange status.'}
+
+@router.get('/fno/{symbol}')
+async def fno_detail(symbol:str):
+    symbol=symbol.upper().strip().replace('.NS','')
+    url='https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi'
+    params={'functionName':'getSymbolDerivativesData','symbol':symbol}
+    headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36','Accept':'application/json,text/plain,*/*','Referer':'https://www.nseindia.com/'}
+    try:
+        async with httpx.AsyncClient(timeout=10,follow_redirects=True,headers=headers) as client:
+            home=await client.get('https://www.nseindia.com/',headers=headers)
+            if home.status_code>=400: return {'status':'unavailable','symbol':symbol,'message':'NSE session unavailable'}
+            r=await client.get(url,params=params)
+            r.raise_for_status(); payload=r.json()
+        raw=payload.get('data',payload)
+        if isinstance(raw,dict): raw=raw.get('data',[]) or raw.get('records',[]) or []
+        if not isinstance(raw,list): raw=[]
+        rows=[]
+        for x in raw:
+            if not isinstance(x,dict): continue
+            oi=x.get('openInterest',x.get('open_interest'))
+            vol=x.get('totalTradedVolume',x.get('total_traded_volume'))
+            chg=x.get('changeinOpenInterest',x.get('changeInOpenInterest',x.get('change_in_open_interest')))
+            lp=x.get('lastPrice',x.get('last_price'))
+            rows.append({'instrument_type':x.get('instrumentType'),'expiry_date':x.get('expiryDate'),'last_price':lp,'open_interest':oi,'volume':vol,'change_in_open_interest':chg,'underlying_value':x.get('underlyingValue')})
+        return {'status':'ok','symbol':symbol,'items':rows,'note':'F&O positioning is an inference from price/OI behaviour, not proof of participant intent.'}
+    except Exception as e:
+        return {'status':'unavailable','symbol':symbol,'items':[],'message':'F&O data temporarily unavailable from NSE public endpoint.'}
